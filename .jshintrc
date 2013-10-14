@@ -1,0 +1,12 @@
+{
+  "esnext":        true,
+  "boss":          true,
+  "unused":        true,
+
+  "maxlen":        100,
+  "maxcomplexity": 20,
+
+  "globals": {
+    "window": true
+  }
+}

@@ -18,3 +18,7 @@ export function async(callback, count) {
 export function expectCall(callback, count) {
   return async(callback, count);
 }
+
+export var test = window.test;
+export var module = window.module;
+export var ok = window.ok;

@@ -10,9 +10,21 @@ module.exports = function(grunt) {
   this.registerTask('default', ['build']);
 
   // Build a new version of the library
-  this.registerTask('build', "Builds a distributable version of " + name, ['clean', 'transpile:amd', 'concat:library', 'concat:browser', 'browser:dist', 'bytes']);
+  this.registerTask('build', "Builds a distributable version of " + name,
+                    ['clean',
+                     'transpile:amd',
+                     'concat:library',
+                     'concat:browser',
+                     'browser:dist',
+                     'bytes'
+                    ]);
 
-  this.registerTask('tests', "Builds the test package", ['build', 'concat:deps', 'transpile:tests', 'buildTests:dist']);
+  this.registerTask('tests', "Builds the test package",
+                    ['build',
+                     'concat:deps',
+                     'transpile:tests',
+                     'buildTests:dist'
+                    ]);
 
   // Run a server. This is ideal for running the QUnit tests in the browser.
   this.registerTask('server', ['build', 'tests', 'connect', 'watch']);
@@ -31,7 +43,7 @@ module.exports = function(grunt) {
     },
 
     watch: {
-      files: ['lib/**', 'vendor/*', 'test/**/*'],
+      files: ['lib/**', 'vendor/**', 'test/**/*'],
       tasks: ['build', 'tests']
     },
 
@@ -85,7 +97,12 @@ module.exports = function(grunt) {
 
     buildTests: {
       dist: {
-        src: ['vendor/loader.js', 'tmp/tests.amd.js', 'tmp/deps.amd.js', 'tmp/' + barename + '.amd.js'],
+        src: [
+          'vendor/loader.js',
+          'tmp/tests.amd.js',
+          'tmp/deps.amd.js',
+          'tmp/' + barename + '.amd.js'
+        ],
         dest: 'tmp/tests.js'
       }
     }
@@ -126,7 +143,7 @@ module.exports = function(grunt) {
 
       testFiles.forEach(function(file) {
         var moduleName = nameFor(file);
-        output.push('requireModule("' + nameFor(file) + '");');
+        output.push('requireModule("' + moduleName + '");');
       });
 
       output.push('})(window);');
@@ -142,7 +159,7 @@ module.exports = function(grunt) {
   }
 
   this.registerMultiTask('transpile', "Transpile ES6 modules into AMD, CJS or globals", function() {
-    var Compiler = require("es6-module-transpiler/lib/compiler");
+    var Compiler = require("es6-module-transpiler-rewrite").Compiler;
 
     var options = this.options({
       format: 'amd'

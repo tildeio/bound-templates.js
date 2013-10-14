@@ -1,99 +1,98 @@
-define("htmlbars/runtime",
-  ["htmlbars/helpers","exports"],
-  function(__dependency1__, __exports__) {
+define("htmlbars", 
+  ["htmlbars/parser","htmlbars/ast","htmlbars/compiler","htmlbars/helpers","htmlbars/macros","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
     "use strict";
-    var helpers = __dependency1__.helpers;
+    var preprocess = __dependency1__.preprocess;
+    var HTMLElement = __dependency2__.HTMLElement;
+    var BlockElement = __dependency2__.BlockElement;
+    var compile = __dependency3__.compile;
+    var registerHelper = __dependency4__.registerHelper;
+    var removeHelper = __dependency4__.removeHelper;
+    var registerMacro = __dependency5__.registerMacro;
+    var removeMacro = __dependency5__.removeMacro;
 
-    // These methods are runtime for now. If they are too expensive,
-    // I may inline them at compile-time.
-    var domHelpers = {
-      appendText: function(element, value) {
-        if (value === undefined) { return; }
-        element.appendChild(document.createTextNode(value));
-      },
-
-      appendHTML: function(element, value) {
-        if (value === undefined) { return; }
-        element.appendChild(this.frag(element, value));
-      },
-
-      appendFragment: function(element, fragment) {
-        if (fragment === undefined) { return; }
-        element.appendChild(fragment);
-      },
-
-      ambiguousContents: function(element, context, string, escaped) {
-        var helper, value, args;
-
-        if (helper = helpers[string]) {
-          return this.helperContents(string, element, context, [], { element: element, escaped: escaped });
-        } else {
-          return this.resolveContents(context, [string], element, escaped);
-        }
-      },
-
-      helperContents: function(name, element, context, args, options) {
-        var helper = helpers[name];
-        options.element = element;
-        args.push(options);
-        return helper.apply(context, args);
-      },
-
-      resolveContents: function(context, parts, element, escaped) {
-        var helper = helpers.RESOLVE;
-        if (helper) {
-          return helper.apply(context, [parts, { element: element, escaped: escaped }]);
-        }
-
-        return parts.reduce(function(current, part) {
-          return current[part];
-        }, context)
-      },
-
-      ambiguousAttr: function(context, string, options) {
-        var helper;
-
-        if (helper = helpers[string]) {
-          throw new Error("helperAttr is not implemented yet");
-        } else {
-          return this.resolveInAttr(context, [string], options)
-        }
-      },
-
-      helperAttr: function(context, name, args, options) {
-        var helper = helpers[name];
-        args.push(options);
-        return helper.apply(context, args);
-      },
-
-      resolveInAttr: function(context, parts, options) {
-        var helper = helpers.RESOLVE_IN_ATTR;
-
-        if (helper) {
-          return helper.apply(context, [parts, options]);
-        }
-
-        return parts.reduce(function(current, part) {
-          return current[part];
-        }, context);
-      },
-
-      frag: function(element, string) {
-        /*global DocumentFragment*/
-        if (element instanceof DocumentFragment) {
-          element = document.createElement('div');
-        }
-
-        var range = document.createRange();
-        range.setStart(element, 0);
-        range.collapse(false);
-        return range.createContextualFragment(string);
-      }
-    };
-    __exports__.domHelpers = domHelpers;
+    __exports__.preprocess = preprocess;
+    __exports__.compile = compile;
+    __exports__.HTMLElement = HTMLElement;
+    __exports__.BlockElement = BlockElement;
+    __exports__.removeHelper = removeHelper;
+    __exports__.registerHelper = registerHelper;
+    __exports__.removeMacro = removeMacro;
+    __exports__.registerMacro = registerMacro;
   });
 
-define("htmlbars/compiler/attr",
+define("htmlbars/ast", 
+  ["handlebars/compiler/ast","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var AST = __dependency1__;
+
+    function HTMLElement(tag, attributes, children, helpers) {
+      this.tag = tag;
+      this.attributes = attributes || [];
+      this.children = children || [];
+      this.helpers = helpers || [];
+
+      if (!attributes) { return; }
+
+      for (var i=0, l=attributes.length; i<l; i++) {
+        var attribute = attributes[i];
+        attributes[attribute[0]] = attribute[1];
+      }
+    }
+
+    function appendChild(node) {
+      this.children.push(node);
+    }
+
+    HTMLElement.prototype = {
+      appendChild: appendChild,
+
+      removeAttr: function(name) {
+        var attributes = this.attributes, attribute;
+        delete attributes[name];
+        for (var i=0, l=attributes.length; i<l; i++) {
+          attribute = attributes[i];
+          if (attribute[0] === name) {
+            attributes.splice(i, 1);
+            break;
+          }
+        }
+      },
+
+      getAttr: function(name) {
+        var attributes = this.attributes;
+        if (attributes.length !== 1 || attributes[0] instanceof AST.MustacheNode) { return; }
+        return attributes[name][0];
+      }
+    };
+
+    function BlockElement(helper, children) {
+      this.helper = helper;
+      this.children = children || [];
+    }
+
+    BlockElement.prototype.appendChild = appendChild;
+
+    __exports__.HTMLElement = HTMLElement;
+    __exports__.BlockElement = BlockElement;
+  });
+
+define("htmlbars/compiler", 
+  ["htmlbars/parser","htmlbars/compiler/utils","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
+    "use strict";
+    var preprocess = __dependency1__.preprocess;
+    var compileAST = __dependency2__.compileAST;
+
+    function compile(string, options) {
+      var ast = preprocess(string);
+      return compileAST(ast, options);
+    }
+    __exports__.compile = compile;
+  });
+
+define("htmlbars/compiler/attr", 
   ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/stack","htmlbars/compiler/quoting","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
     "use strict";
@@ -184,252 +183,25 @@ define("htmlbars/compiler/attr",
     __exports__.AttrCompiler = AttrCompiler;
   });
 
-define("htmlbars/compiler/stack",
+define("htmlbars/compiler/elements", 
   ["exports"],
   function(__exports__) {
     "use strict";
-    // this file exists in anticipation of a more involved
-    // stack implementation involving temporary variables
-
-    function pushStack(stack, literal) {
-      stack.push({ literal: true, value: literal });
+    function pushElement(compiler) {
+      return "element" + (++compiler.elementNumber);
     }
 
-    function popStack(stack) {
-      var poppedValue = stack.pop();
-      return poppedValue.value;
+    __exports__.pushElement = pushElement;function popElement(compiler) {
+      return "element" + (compiler.elementNumber--);
     }
-    __exports__.pushStack = pushStack;
-    __exports__.popStack = popStack;
+
+    __exports__.popElement = popElement;function topElement(compiler) {
+      return "element" + compiler.elementNumber;
+    }
+    __exports__.topElement = topElement;
   });
 
-define("htmlbars/compiler/pass2",
-  ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/elements","htmlbars/compiler/stack","htmlbars/compiler/quoting","htmlbars/runtime","htmlbars/helpers","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __exports__) {
-    "use strict";
-    var processOpcodes = __dependency1__.processOpcodes;
-    var prepareHelper = __dependency2__.prepareHelper;
-    var call = __dependency3__.call;
-    var helper = __dependency3__.helper;
-    var pushElement = __dependency4__.pushElement;
-    var popElement = __dependency4__.popElement;
-    var topElement = __dependency4__.topElement;
-    var pushStack = __dependency5__.pushStack;
-    var popStack = __dependency5__.popStack;
-    var string = __dependency6__.string;
-    var quotedArray = __dependency6__.quotedArray;
-    var hash = __dependency6__.hash;
-    var domHelpers = __dependency7__.domHelpers;
-    var helpers = __dependency8__.helpers;
-
-    function Compiler2() {};
-
-    var compiler2 = Compiler2.prototype;
-
-    compiler2.compile = function(opcodes, options) {
-      this.output = [];
-      this.elementNumber = 0;
-      this.stackNumber = 0;
-      this.stack = [];
-      this.children = options.children;
-
-      this.output.push("return function template(context, options) {")
-      this.preamble();
-      processOpcodes(this, opcodes);
-      this.postamble();
-      this.output.push("};");
-
-      // console.debug(this.output.join("\n"));
-
-      // have the generated function close over the DOM helpers
-      var generator = new Function('dom', this.output.join("\n"));
-      return generator(domHelpers);
-    };
-
-    compiler2.preamble = function() {
-      this.children.forEach(function(child, i) {
-        this.push("var child" + i + " = " + child.toString());
-      }, this);
-
-      this.push("var element0, el");
-      this.push("var frag = element0 = document.createDocumentFragment()");
-    };
-
-    compiler2.postamble = function() {
-      this.output.push("return frag;");
-    };
-
-    compiler2.program = function(programId) {
-      pushStack(this.stack, programId);
-    };
-
-    compiler2.content = function(str) {
-      this.push(call([this.el(), 'appendChild'], helper('frag', this.el(), string(str))));
-    };
-
-    compiler2.push = function(string) {
-      this.output.push(string + ";");
-    };
-
-    compiler2.el = function() {
-      return topElement(this);
-    };
-
-    compiler2.id = function(parts) {
-      pushStack(this.stack, string('id'));
-      pushStack(this.stack, quotedArray(parts));
-    };
-
-    compiler2.literal = function(literal) {
-      pushStack(this.stack, string(typeof literal));
-      pushStack(this.stack, literal);
-    };
-
-    compiler2.stackLiteral = function(literal) {
-      pushStack(this.stack, literal);
-    };
-
-    compiler2.string = function(str) {
-      pushStack(this.stack, string('string'));
-      pushStack(this.stack, string(str));
-    };
-
-    compiler2.appendText = function() {
-      this.push(helper('appendText', this.el(), popStack(this.stack)));
-    };
-
-    compiler2.appendHTML = function() {
-      this.push(helper('appendHTML', this.el(), popStack(this.stack)));
-    };
-
-    compiler2.appendFragment = function() {
-      this.push(helper('appendFragment', this.el(), popStack(this.stack)));
-    }
-
-    compiler2.openElement = function(tagName) {
-      var elRef = pushElement(this);
-      this.push("var " + elRef + " = el = " + call('document.createElement', string(tagName)));
-    };
-
-    compiler2.attribute = function(name, child) {
-      var invokeRererender = call('el.setAttribute', string(name), call('child' + child, 'context', hash(['rerender:rerender'])));
-      var rerender = 'function rerender() { ' + invokeRererender + '}';
-      var options = hash(['rerender:' + rerender, 'element:el', 'attrName:' + string(name)]);
-      pushStack(this.stack, call('child' + child, 'context', options));
-
-      this.push(call('el.setAttribute', string(name), popStack(this.stack)));
-    };
-
-    compiler2.closeElement = function() {
-      var elRef = popElement(this);
-      this.push(call([this.el(), 'appendChild'], elRef));
-    };
-
-    compiler2.dynamic = function(parts, escaped) {
-      pushStack(this.stack, helper('resolveContents', 'context', quotedArray(parts), this.el(), escaped));
-    };
-
-    compiler2.ambiguous = function(str, escaped) {
-      pushStack(this.stack, helper('ambiguousContents', this.el(), 'context', string(str), escaped));
-    };
-
-    compiler2.helper = function(name, size, escaped) {
-      var prepared = prepareHelper(this.stack, size);
-      pushStack(this.stack, helper('helperContents', string(name), this.el(), 'context', prepared.args, hash(prepared.options)));
-    };
-
-    compiler2.nodeHelper = function(name, size) {
-      var prepared = prepareHelper(this.stack, size);
-      this.push(helper('helperContents', string(name), this.el(), 'context', prepared.args, hash(prepared.options)));
-    };
-
-    __exports__.Compiler2 = Compiler2;
-  });
-
-define("htmlbars/compiler/invoke",
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    function call(func) {
-      if (typeof func.join === 'function') {
-        func = func.join('.');
-      }
-
-      var params = [].slice.call(arguments, 1);
-      return func + "(" + params.join(", ") + ")";
-    }
-
-
-    function helper() {
-      var args = [].slice.call(arguments, 0);
-      args[0] = 'dom.' + args[0];
-      return call.apply(this, args);
-    }
-    __exports__.call = call;
-    __exports__.helper = helper;
-  });
-
-define("htmlbars/compiler/utils",
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    function processOpcodes(compiler, opcodes) {
-      opcodes.forEach(function(opcode) {
-        compiler[opcode.type].apply(compiler, opcode.params);
-      });
-    }
-
-    function compileAST(ast, options) {
-      // circular dependency hack
-      var Compiler1 = require('htmlbars/compiler/pass1').Compiler1;
-      var Compiler2 = require('htmlbars/compiler/pass2').Compiler2;
-
-      var compiler1 = new Compiler1(options),
-          compiler2 = new Compiler2(options);
-
-      var opcodes = compiler1.compile(ast);
-      return compiler2.compile(opcodes, {
-        children: compiler1.children
-      });
-    }
-    __exports__.processOpcodes = processOpcodes;
-    __exports__.compileAST = compileAST;
-  });
-
-define("htmlbars/compiler/quoting",
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    function escapeString(str) {
-      return str.replace(/'/g, "\\'");
-    }
-
-
-    function string(str) {
-      return "'" + escapeString(str) + "'";
-    }
-
-
-    function array(array) {
-      return "[" + array + "]";
-    }
-
-
-    function quotedArray(list) {
-      return array(list.map(string).join(", "));
-    }
-
-    function hash(pairs) {
-      return "{" + pairs.join(",") + "}";
-    }
-    __exports__.escapeString = escapeString;
-    __exports__.string = string;
-    __exports__.array = array;
-    __exports__.quotedArray = quotedArray;
-    __exports__.hash = hash;
-  });
-
-define("htmlbars/compiler/helpers",
+define("htmlbars/compiler/helpers", 
   ["htmlbars/compiler/quoting","htmlbars/compiler/stack","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
@@ -475,27 +247,30 @@ define("htmlbars/compiler/helpers",
     __exports__.prepareHelper = prepareHelper;
   });
 
-define("htmlbars/compiler/elements",
+define("htmlbars/compiler/invoke", 
   ["exports"],
   function(__exports__) {
     "use strict";
-    function pushElement(compiler) {
-      return "element" + (++compiler.elementNumber);
+    function call(func) {
+      if (typeof func.join === 'function') {
+        func = func.join('.');
+      }
+
+      var params = [].slice.call(arguments, 1);
+      return func + "(" + params.join(", ") + ")";
     }
 
-    function popElement(compiler) {
-      return "element" + (compiler.elementNumber--);
-    }
+    __exports__.call = call;
 
-    function topElement(compiler) {
-      return "element" + compiler.elementNumber;
+    function helper() {
+      var args = [].slice.call(arguments, 0);
+      args[0] = 'dom.' + args[0];
+      return call.apply(this, args);
     }
-    __exports__.pushElement = pushElement;
-    __exports__.popElement = popElement;
-    __exports__.topElement = topElement;
+    __exports__.helper = helper;
   });
 
-define("htmlbars/compiler/pass1",
+define("htmlbars/compiler/pass1", 
   ["htmlbars/utils","htmlbars/ast","htmlbars/compiler/attr","htmlbars/compiler/utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
@@ -696,7 +471,244 @@ define("htmlbars/compiler/pass1",
     __exports__.Compiler1 = Compiler1;
   });
 
-define("htmlbars/html-parser/process-token",
+define("htmlbars/compiler/pass2", 
+  ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/elements","htmlbars/compiler/stack","htmlbars/compiler/quoting","htmlbars/runtime","htmlbars/helpers","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __exports__) {
+    "use strict";
+    var processOpcodes = __dependency1__.processOpcodes;
+    var prepareHelper = __dependency2__.prepareHelper;
+    var call = __dependency3__.call;
+    var helper = __dependency3__.helper;
+    var pushElement = __dependency4__.pushElement;
+    var popElement = __dependency4__.popElement;
+    var topElement = __dependency4__.topElement;
+    var pushStack = __dependency5__.pushStack;
+    var popStack = __dependency5__.popStack;
+    var string = __dependency6__.string;
+    var quotedArray = __dependency6__.quotedArray;
+    var hash = __dependency6__.hash;
+    var domHelpers = __dependency7__.domHelpers;
+    var helpers = __dependency8__.helpers;
+
+    function Compiler2() {};
+
+    var compiler2 = Compiler2.prototype;
+
+    compiler2.compile = function(opcodes, options) {
+      this.output = [];
+      this.elementNumber = 0;
+      this.stackNumber = 0;
+      this.stack = [];
+      this.children = options.children;
+
+      this.output.push("return function template(context, options) {")
+      this.preamble();
+      processOpcodes(this, opcodes);
+      this.postamble();
+      this.output.push("};");
+
+      // console.debug(this.output.join("\n"));
+
+      // have the generated function close over the DOM helpers
+      var generator = new Function('dom', this.output.join("\n"));
+      return generator(domHelpers);
+    };
+
+    compiler2.preamble = function() {
+      this.children.forEach(function(child, i) {
+        this.push("var child" + i + " = " + child.toString());
+      }, this);
+
+      this.push("var element0, el");
+      this.push("var frag = element0 = document.createDocumentFragment()");
+    };
+
+    compiler2.postamble = function() {
+      this.output.push("return frag;");
+    };
+
+    compiler2.program = function(programId) {
+      pushStack(this.stack, programId);
+    };
+
+    compiler2.content = function(str) {
+      this.push(call([this.el(), 'appendChild'], helper('frag', this.el(), string(str))));
+    };
+
+    compiler2.push = function(string) {
+      this.output.push(string + ";");
+    };
+
+    compiler2.el = function() {
+      return topElement(this);
+    };
+
+    compiler2.id = function(parts) {
+      pushStack(this.stack, string('id'));
+      pushStack(this.stack, quotedArray(parts));
+    };
+
+    compiler2.literal = function(literal) {
+      pushStack(this.stack, string(typeof literal));
+      pushStack(this.stack, literal);
+    };
+
+    compiler2.stackLiteral = function(literal) {
+      pushStack(this.stack, literal);
+    };
+
+    compiler2.string = function(str) {
+      pushStack(this.stack, string('string'));
+      pushStack(this.stack, string(str));
+    };
+
+    compiler2.appendText = function() {
+      this.push(helper('appendText', this.el(), popStack(this.stack)));
+    };
+
+    compiler2.appendHTML = function() {
+      this.push(helper('appendHTML', this.el(), popStack(this.stack)));
+    };
+
+    compiler2.appendFragment = function() {
+      this.push(helper('appendFragment', this.el(), popStack(this.stack)));
+    }
+
+    compiler2.openElement = function(tagName) {
+      var elRef = pushElement(this);
+      this.push("var " + elRef + " = el = " + call('document.createElement', string(tagName)));
+    };
+
+    compiler2.attribute = function(name, child) {
+      var invokeRererender = call('el.setAttribute', string(name), call('child' + child, 'context', hash(['rerender:rerender'])));
+      var rerender = 'function rerender() { ' + invokeRererender + '}';
+      var options = hash(['rerender:' + rerender, 'element:el', 'attrName:' + string(name)]);
+      pushStack(this.stack, call('child' + child, 'context', options));
+
+      this.push(call('el.setAttribute', string(name), popStack(this.stack)));
+    };
+
+    compiler2.closeElement = function() {
+      var elRef = popElement(this);
+      this.push(call([this.el(), 'appendChild'], elRef));
+    };
+
+    compiler2.dynamic = function(parts, escaped) {
+      pushStack(this.stack, helper('resolveContents', 'context', quotedArray(parts), this.el(), escaped));
+    };
+
+    compiler2.ambiguous = function(str, escaped) {
+      pushStack(this.stack, helper('ambiguousContents', this.el(), 'context', string(str), escaped));
+    };
+
+    compiler2.helper = function(name, size, escaped) {
+      var prepared = prepareHelper(this.stack, size);
+      pushStack(this.stack, helper('helperContents', string(name), this.el(), 'context', prepared.args, hash(prepared.options)));
+    };
+
+    compiler2.nodeHelper = function(name, size) {
+      var prepared = prepareHelper(this.stack, size);
+      this.push(helper('helperContents', string(name), this.el(), 'context', prepared.args, hash(prepared.options)));
+    };
+
+    __exports__.Compiler2 = Compiler2;
+  });
+
+define("htmlbars/compiler/quoting", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    function escapeString(str) {
+      return str.replace(/'/g, "\\'");
+    }
+
+    __exports__.escapeString = escapeString;
+
+    function string(str) {
+      return "'" + escapeString(str) + "'";
+    }
+
+    __exports__.string = string;
+
+    function array(array) {
+      return "[" + array + "]";
+    }
+
+    __exports__.array = array;
+
+    function quotedArray(list) {
+      return array(list.map(string).join(", "));
+    }
+
+    __exports__.quotedArray = quotedArray;function hash(pairs) {
+      return "{" + pairs.join(",") + "}";
+    }
+    __exports__.hash = hash;
+  });
+
+define("htmlbars/compiler/stack", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    // this file exists in anticipation of a more involved
+    // stack implementation involving temporary variables
+
+    function pushStack(stack, literal) {
+      stack.push({ literal: true, value: literal });
+    }
+
+    __exports__.pushStack = pushStack;function popStack(stack) {
+      var poppedValue = stack.pop();
+      return poppedValue.value;
+    }
+    __exports__.popStack = popStack;
+  });
+
+define("htmlbars/compiler/utils", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    function processOpcodes(compiler, opcodes) {
+      opcodes.forEach(function(opcode) {
+        compiler[opcode.type].apply(compiler, opcode.params);
+      });
+    }
+
+    __exports__.processOpcodes = processOpcodes;function compileAST(ast, options) {
+      // circular dependency hack
+      var Compiler1 = requireModule('htmlbars/compiler/pass1').Compiler1;
+      var Compiler2 = requireModule('htmlbars/compiler/pass2').Compiler2;
+
+      var compiler1 = new Compiler1(options),
+          compiler2 = new Compiler2(options);
+
+      var opcodes = compiler1.compile(ast);
+      return compiler2.compile(opcodes, {
+        children: compiler1.children
+      });
+    }
+
+    __exports__.compileAST = compileAST;
+  });
+
+define("htmlbars/helpers", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    var helpers = {};
+
+    function registerHelper(name, callback) {
+      helpers[name] = callback;
+    }
+
+    __exports__.registerHelper = registerHelper;function removeHelper(name) {
+      delete helpers[name];
+    }
+
+    __exports__.removeHelper = removeHelper;__exports__.helpers = helpers;
+  });
+
+define("htmlbars/html-parser/process-token", 
   ["htmlbars/ast","simple-html-tokenizer","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
@@ -718,7 +730,7 @@ define("htmlbars/html-parser/process-token",
       return handlers[child.type](child, currentElement(stack), stack, token, state);
     }
 
-    function currentElement(stack) {
+    __exports__.processToken = processToken;function currentElement(stack) {
       return stack[stack.length - 1];
     }
 
@@ -776,13 +788,13 @@ define("htmlbars/html-parser/process-token",
           throw new Error("Closing tag " + tag.tagName + " did not match last open tag " + current.tag);
         }
 
-        var value = config.processHTMLMacros(current)
+        var value = config.processHTMLMacros(current);
         stack.pop();
 
         if (value === 'veto') { return; }
 
         var parent = currentElement(stack);
-        parent.appendChild(value || currentElement);
+        parent.appendChild(value || current);
       }
     };
 
@@ -790,14 +802,55 @@ define("htmlbars/html-parser/process-token",
       processHTMLMacros: function() {}
     };
 
-
-    __exports__.processToken = processToken;
     __exports__.config = config;
   });
 
-define("htmlbars/parser",
-  ["simple-html-tokenizer","htmlbars/ast","htmlbars/html-parser/process-token","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
+define("htmlbars/macros", 
+  ["htmlbars/html-parser/process-token","htmlbars/ast","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
+    "use strict";
+    var config = __dependency1__.config;
+    var HTMLElement = __dependency2__.HTMLElement;
+
+    var htmlMacros = {};
+
+    function registerMacro(name, test, mutate) {
+      htmlMacros[name] = { test: test, mutate: mutate };
+    }
+
+    __exports__.registerMacro = registerMacro;function removeMacro(name) {
+      delete htmlMacros[name];
+    }
+
+    __exports__.removeMacro = removeMacro;function processHTMLMacros(element) {
+      var mutated, newElement;
+
+      for (var prop in htmlMacros) {
+        var macro = htmlMacros[prop];
+        if (macro.test(element)) {
+          newElement = macro.mutate(element);
+          if (newElement === undefined) { newElement = element; }
+          mutated = true;
+          break;
+        }
+      }
+
+      if (!mutated) {
+        return element;
+      } else if (newElement instanceof HTMLElement) {
+        return processHTMLMacros(newElement);
+      } else {
+        return newElement;
+      }
+    }
+
+    // configure the HTML Parser
+    config.processHTMLMacros = processHTMLMacros;
+  });
+
+define("htmlbars/parser", 
+  ["simple-html-tokenizer","htmlbars/ast","htmlbars/html-parser/process-token","handlebars","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
     var Tokenizer = __dependency1__.Tokenizer;
     var Chars = __dependency1__.Chars;
@@ -806,20 +859,31 @@ define("htmlbars/parser",
     var HTMLElement = __dependency2__.HTMLElement;
     var BlockElement = __dependency2__.BlockElement;
     var processToken = __dependency3__.processToken;
+    var Handlebars = __dependency4__['default'];
+
+    function Visitor() {}
+
+    Visitor.prototype = {
+      constructor: Visitor,
+
+      accept: function(node) {
+        return this[node.type](node);
+      }
+    };
 
     function preprocess(html) {
       var ast = Handlebars.parse(html);
       return new HTMLProcessor().accept(ast);
-    };
+    }
 
-    function HTMLProcessor() {
+    __exports__.preprocess = preprocess;function HTMLProcessor() {
       // document fragment
       this.elementStack = [new HTMLElement()];
       this.tokenizer = new Tokenizer('');
-    };
+    }
 
     // TODO: ES3 polyfill
-    var processor = HTMLProcessor.prototype = Object.create(Handlebars.Visitor.prototype);
+    var processor = HTMLProcessor.prototype = Object.create(Visitor.prototype);
 
     processor.program = function(program) {
       var statements = program.statements;
@@ -895,12 +959,105 @@ define("htmlbars/parser",
       var helpers = this.helpers = this.helpers || [];
 
       helpers.push(helper);
-    }
-
-    __exports__.preprocess = preprocess;
+    };
   });
 
-define("htmlbars/utils",
+define("htmlbars/runtime", 
+  ["htmlbars/helpers","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var helpers = __dependency1__.helpers;
+
+    // These methods are runtime for now. If they are too expensive,
+    // I may inline them at compile-time.
+    var domHelpers = {
+      appendText: function(element, value) {
+        if (value === undefined) { return; }
+        element.appendChild(document.createTextNode(value));
+      },
+
+      appendHTML: function(element, value) {
+        if (value === undefined) { return; }
+        element.appendChild(this.frag(element, value));
+      },
+
+      appendFragment: function(element, fragment) {
+        if (fragment === undefined) { return; }
+        element.appendChild(fragment);
+      },
+
+      ambiguousContents: function(element, context, string, escaped) {
+        var helper, value, args;
+
+        if (helper = helpers[string]) {
+          return this.helperContents(string, element, context, [], { element: element, escaped: escaped });
+        } else {
+          return this.resolveContents(context, [string], element, escaped);
+        }
+      },
+
+      helperContents: function(name, element, context, args, options) {
+        var helper = helpers[name];
+        options.element = element;
+        args.push(options);
+        return helper.apply(context, args);
+      },
+
+      resolveContents: function(context, parts, element, escaped) {
+        var helper = helpers.RESOLVE;
+        if (helper) {
+          return helper.apply(context, [parts, { element: element, escaped: escaped }]);
+        }
+
+        return parts.reduce(function(current, part) {
+          return current[part];
+        }, context)
+      },
+
+      ambiguousAttr: function(context, string, options) {
+        var helper;
+
+        if (helper = helpers[string]) {
+          throw new Error("helperAttr is not implemented yet");
+        } else {
+          return this.resolveInAttr(context, [string], options)
+        }
+      },
+
+      helperAttr: function(context, name, args, options) {
+        var helper = helpers[name];
+        args.push(options);
+        return helper.apply(context, args);
+      },
+
+      resolveInAttr: function(context, parts, options) {
+        var helper = helpers.RESOLVE_IN_ATTR;
+
+        if (helper) {
+          return helper.apply(context, [parts, options]);
+        }
+
+        return parts.reduce(function(current, part) {
+          return current[part];
+        }, context);
+      },
+
+      frag: function(element, string) {
+        /*global DocumentFragment*/
+        if (element instanceof DocumentFragment) {
+          element = document.createElement('div');
+        }
+
+        var range = document.createRange();
+        range.setStart(element, 0);
+        range.collapse(false);
+        return range.createContextualFragment(string);
+      }
+    };
+    __exports__.domHelpers = domHelpers;
+  });
+
+define("htmlbars/utils", 
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -914,163 +1071,44 @@ define("htmlbars/utils",
     __exports__.merge = merge;
   });
 
-define("htmlbars/compiler",
-  ["htmlbars/parser","htmlbars/compiler/utils","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
+define("loader", 
+  [],
+  function() {
     "use strict";
-    var preprocess = __dependency1__.preprocess;
-    var compileAST = __dependency2__.compileAST;
+    var define, require;
 
-    function compile(string, options) {
-      var ast = preprocess(string);
-      return compileAST(ast, options);
-    }
-    __exports__.compile = compile;
-  });
+    (function() {
+      var registry = {}, seen = {};
 
-define("htmlbars/helpers",
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    var helpers = {};
+      define = function(name, deps, callback) {
+        registry[name] = { deps: deps, callback: callback };
+      };
 
-    function registerHelper(name, callback) {
-      helpers[name] = callback;
-    }
+      require = function require(name) {
+        if (seen[name]) { return seen[name]; }
+        seen[name] = {};
 
-    function removeHelper(name) {
-      delete helpers[name];
-    }
+        var mod = registry[name],
+            deps = mod.deps,
+            callback = mod.callback,
+            reified = [],
+            exports;
 
-    __exports__.registerHelper = registerHelper;
-    __exports__.removeHelper = removeHelper;
-    __exports__.helpers = helpers;
-  });
-
-define("htmlbars/ast",
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    function HTMLElement(tag, attributes, children, helpers) {
-      this.tag = tag;
-      this.attributes = attributes || [];
-      this.children = children || [];
-      this.helpers = helpers || [];
-
-      if (!attributes) { return; }
-
-      for (var i=0, l=attributes.length; i<l; i++) {
-        var attribute = attributes[i];
-        attributes[attribute[0]] = attribute[1];
-      }
-    };
-
-    function appendChild(node) {
-      this.children.push(node);
-    }
-
-    HTMLElement.prototype = {
-      appendChild: appendChild,
-
-      removeAttr: function(name) {
-        var attributes = this.attributes, attribute;
-        delete attributes[name];
-        for (var i=0, l=attributes.length; i<l; i++) {
-          attribute = attributes[i];
-          if (attribute[0] === name) {
-            attributes.splice(i, 1);
-            break;
+        for (var i=0, l=deps.length; i<l; i++) {
+          if (deps[i] === 'exports') {
+            reified.push(exports = {});
+          } else {
+            reified.push(require(deps[i]));
           }
         }
-      },
 
-      getAttr: function(name) {
-        var attributes = this.attributes;
-        if (attributes.length !== 1 || attributes[0] instanceof Handlebars.AST.MustacheNode) { return; }
-        return attributes[name][0];
-      }
-    }
-
-    function BlockElement(helper, children) {
-      this.helper = helper;
-      this.children = children || [];
-    };
-
-    BlockElement.prototype.appendChild = appendChild;
-
-    __exports__.HTMLElement = HTMLElement;
-    __exports__.BlockElement = BlockElement;
+        var value = callback.apply(this, reified);
+        return seen[name] = exports || value;
+      };
+    })();
   });
 
-define("htmlbars/macros",
-  ["htmlbars/html-parser/process-token","htmlbars/ast","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
-    "use strict";
-    var config = __dependency1__.config;
-    var HTMLElement = __dependency2__.HTMLElement;
-
-    var htmlMacros = {};
-
-    function registerMacro(name, test, mutate) {
-      htmlMacros[name] = { test: test, mutate: mutate };
-    };
-
-    function removeMacro(name) {
-      delete htmlMacros[name];
-    }
-
-    function processHTMLMacros(element) {
-      var mutated, newElement;
-
-      for (var prop in htmlMacros) {
-        var macro = htmlMacros[prop];
-        if (macro.test(element)) {
-          newElement = macro.mutate(element);
-          if (newElement === undefined) { newElement = element; }
-          mutated = true;
-          break;
-        }
-      }
-
-      if (!mutated) {
-        return element;
-      } else if (newElement instanceof HTMLElement) {
-        return processHTMLMacros(newElement);
-      } else {
-        return newElement;
-      }
-    }
-
-    // configure the HTML Parser
-    config.processHTMLMacros = processHTMLMacros;
-    __exports__.registerMacro = registerMacro;
-    __exports__.removeMacro = removeMacro;
-  });
-
-define("htmlbars",
-  ["htmlbars/parser","htmlbars/ast","htmlbars/compiler","htmlbars/helpers","htmlbars/macros","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
-    "use strict";
-    var preprocess = __dependency1__.preprocess;
-    var HTMLElement = __dependency2__.HTMLElement;
-    var BlockElement = __dependency2__.BlockElement;
-    var compile = __dependency3__.compile;
-    var registerHelper = __dependency4__.registerHelper;
-    var removeHelper = __dependency4__.removeHelper;
-    var registerMacro = __dependency5__.registerMacro;
-    var removeMacro = __dependency5__.removeMacro;
-
-    __exports__.preprocess = preprocess;
-    __exports__.compile = compile;
-    __exports__.HTMLElement = HTMLElement;
-    __exports__.BlockElement = BlockElement;
-    __exports__.removeHelper = removeHelper;
-    __exports__.registerHelper = registerHelper;
-    __exports__.removeMacro = removeMacro;
-    __exports__.registerMacro = registerMacro;
-  });
-
-define("simple-html-tokenizer",
+define("simple-html-tokenizer", 
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -1503,7 +1541,7 @@ define("simple-html-tokenizer",
     CommentToken.prototype = {
       type: 'CommentToken',
       constructor: CommentToken,
-  
+      
       finalize: function() { return this; },
 
       addChar: function(char) {
