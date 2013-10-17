@@ -26,42 +26,6 @@ function compile(string, options) {
   });
 }
 
-function PathObserver(model, path) {
-  var observer = this;
-
-  var stream = new Stream(function(next) {
-    addObserver(model, path, function() {
-      var value = observer.currentValue = model[path];
-      next(value);
-    });
-
-    return observer;
-  });
-
-  this.currentValue = model[path];
-  this.subscribe = stream.subscribe;
-}
-
-PathObserver.prototype = {
-  constructor: PathObserver,
-
-  subscribed: function(callbacks) {
-    callbacks.next(this.currentValue);
-  }
-};
-
-function addObserver(model, path, callback) {
-  model.__observers = model.__observers || {};
-  model.__observers[path] = model.__observers[path] || [];
-  model.__observers[path].push(callback);
-}
-
-function notify(model, path) {
-  model.__observers[path].forEach(function(callback) {
-    callback();
-  });
-}
-
 module("Basic test", {
   setup: function() {
   }
@@ -98,6 +62,42 @@ test("Curlies are data-bound using the specified wrapper", function() {
 
   equalHTML(fragment, "<p data-test-success=\"true\">hello world</p>");
 });
+
+function PathObserver(model, path) {
+  var observer = this;
+
+  var stream = new Stream(function(next) {
+    addObserver(model, path, function() {
+      var value = observer.currentValue = model[path];
+      next(value);
+    });
+
+    return observer;
+  });
+
+  this.currentValue = model[path];
+  this.subscribe = stream.subscribe;
+}
+
+PathObserver.prototype = {
+  constructor: PathObserver,
+
+  subscribed: function(callbacks) {
+    callbacks.next(this.currentValue);
+  }
+};
+
+function addObserver(model, path, callback) {
+  model.__observers = model.__observers || {};
+  model.__observers[path] = model.__observers[path] || [];
+  model.__observers[path].push(callback);
+}
+
+function notify(model, path) {
+  model.__observers[path].forEach(function(callback) {
+    callback();
+  });
+}
 
 test("Curlies can be updated when the model changes", function() {
   var template = compile("<p>{{hello}}</p>");
