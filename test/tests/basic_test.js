@@ -1,68 +1,69 @@
-import compile from "bound-templates/compiler";
-import Env from "bound-templates/environment";
+import { compileSpec, hydrate } from "bound-templates/compiler";
 import { test, module, ok } from "test_helpers";
+import { merge } from "htmlbars/utils";
+import Stream from "bound-templates/stream";
+import HTMLElement from "bound-templates/wrappers/html-element";
 
 function equalHTML(fragment, html) {
   var div = document.createElement("div");
-  div.appendChild(fragment.cloneNode(true));
+  div.appendChild(fragment.node.cloneNode(true));
 
   equal(div.innerHTML, html);
 }
 
-var env;
+function compile(string, options) {
+  var spec = compileSpec(string);
 
-function Element(node) {
-  this.node = node;
+  var defaultExtensions = {
+    PathObserver: PathObserver
+  };
+
+  options = options || {};
+  var extensions = options.extensions || {};
+
+  return hydrate(spec, {
+    extensions: merge(extensions, defaultExtensions)
+  });
 }
 
-var element = Element.prototype;
+function PathObserver(model, path) {
+  var observer = this;
 
-element.bind = function(attr, model, prop) {
-  var node = this.node;
+  var stream = new Stream(function(next) {
+    addObserver(model, path, function() {
+      var value = observer.currentValue = model[path];
+      next(value);
+    });
 
-  observe(model, prop, function() {
-    node.setAttribute(attr, model[prop]);
+    return observer;
   });
+
+  this.currentValue = model[path];
+  this.subscribe = stream.subscribe;
+}
+
+PathObserver.prototype = {
+  constructor: PathObserver,
+
+  subscribed: function(callbacks) {
+    callbacks.next(this.currentValue);
+  }
 };
 
-function observe(model, prop, callback, binding) {
-  model.__observers = model.__observers || [];
-  model.__observers.push([prop, callback, binding]);
+function addObserver(model, path, callback) {
+  model.__observers = model.__observers || {};
+  model.__observers[path] = model.__observers[path] || [];
+  model.__observers[path].push(callback);
 }
 
-function unobserve(model, prop, callback, binding) {
-  var observers = model.__observers;
-  if (!observers) { return; }
-
-  var newObservers = [];
-  observers.forEach(function(observer) {
-    if (observer[0] === prop && observer[1] === callback && observer[2] === binding) {
-      return;
-    }
-    newObservers.push(observer);
-  });
-
-  model.__observers = newObservers;
-}
-
-function notify(model, prop) {
-  var observers = model.__observers;
-  if (!observers) { return; }
-
-  observers.forEach(function(observer) {
-    if (observer[0] === prop) {
-      observer[1].call(observer[2], observer[0]);
-    }
+function notify(model, path) {
+  model.__observers[path].forEach(function(callback) {
+    callback();
   });
 }
 
 module("Basic test", {
   setup: function() {
-    env = new Env({
-      wrappers: {
-        HTMLElement: Element
-      }
-    });
   }
 });
 
@@ -79,15 +80,35 @@ test("Basic curlies insert the contents of the curlies", function() {
 });
 
 test("Curlies are data-bound using the specified wrapper", function() {
-  var template = compile("<p>{{hello}}</p>"),
-      model = { hello: "hello world" },
-      fragment = template(model, { wrappers: wrappers });
+  function TestHTMLElement(name) {
+    HTMLElement.call(this, name);
+    this.node.setAttribute('data-test-success', true);
+  }
+
+  TestHTMLElement.prototype = Object.create(HTMLElement.prototype);
+
+  var template = compile("<p>{{hello}}</p>", {
+    extensions: {
+      HTMLElement: TestHTMLElement
+    }
+  });
+
+  var model = { hello: "hello world" },
+      fragment = template(model);
+
+  equalHTML(fragment, "<p data-test-success=\"true\">hello world</p>");
+});
+
+test("Curlies can be updated when the model changes", function() {
+  var template = compile("<p>{{hello}}</p>");
+
+  var model = { hello: "hello world" },
+      fragment = template(model);
 
   equalHTML(fragment, "<p>hello world</p>");
 
   model.hello = "goodbye cruel world";
-
   notify(model, 'hello');
 
-  equalHTML(fragment, "<p>goodbye cruel world");
+  equalHTML(fragment, "<p>goodbye cruel world</p>");
 });
