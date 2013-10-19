@@ -36,12 +36,13 @@ function PathObserver(model, path) {
       next(value);
     });
 
+    this.deferConnection();
+
     return observer;
   });
 
   this.currentValue = model[path];
   this.subscribe = stream.subscribe;
-  this.connect = stream.connect;
 }
 
 PathObserver.prototype = {

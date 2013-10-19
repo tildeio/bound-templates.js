@@ -156,16 +156,10 @@ define("bound-templates/stream",
         subscribers.forEach(function(sub) { if (sub.error) sub.error(reason); });
       }
 
-      var connected = false;
+      var connected = true;
 
-      this.connect = function() {
-        connected = true;
-
-        // The callback can call connect(), and then there are obviously
-        // no subscribers yet.
-        if (delegate && delegate.subscribed) {
-          subscribers.forEach(delegate.subscribed, delegate);
-        }
+      this.deferConnection = function() {
+        connected = false;
       };
 
       var delegate = callback.call(this, next, complete, error) || {};
@@ -174,7 +168,9 @@ define("bound-templates/stream",
         var subscriber = { next: next, error: error, complete: complete };
         subscribers.push(subscriber);
 
-        if (connected) { connect(); }
+        if (connected) {
+          connect();
+        }
 
         function unsubscribe() {
           remove(subscribers, subscriber);
@@ -185,18 +181,20 @@ define("bound-templates/stream",
         }
 
         function connect() {
+          subscribers.push(subscriber);
+
           if (delegate.subscribed) {
-            subscribers.forEach(delegate.subscribed, delegate);
+            delegate.subscribed(subscriber);
           }
 
           return subscription;
         }
 
-        var subscription = { unsubscribe: unsubscribe, connect: connect };
+        var subscription = { unsubscribe: unsubscribe };
+        subscription.connect = connected ? function() {} : connect;
 
         return subscription;
       };
-
     }
 
     __exports__['default'] = Stream;
@@ -207,11 +205,9 @@ define("bound-templates/stream",
           next(callback.call(binding, value));
         }, error, complete);
 
-        this.connect();
-
         return {
           subscribed: function() {
-            parentSubscription.connect();
+            if (parentSubscription.connect) parentSubscription.connect();
           }
         };
       });
@@ -225,8 +221,6 @@ define("bound-templates/stream",
           current = value;
           next(value);
         }, error, complete);
-
-        this.connect();
 
         return {
           subscribed: function(subscriber) {
@@ -291,11 +285,11 @@ define("bound-templates/wrappers/text-node",
       bind: function(attribute, stream) {
         var node = this.node;
 
-        stream.subscribe(function(value) {
+        var subscription = stream.subscribe(function(value) {
           node[attribute] = value;
         });
 
-        if (stream.connect) stream.connect();
+        subscription.connect();
       }
     };
 

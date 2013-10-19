@@ -1057,12 +1057,12 @@ define("htmlbars/runtime",
 
           buffer.push('');
 
-          stream.subscribe(function(next) {
+          var subscription = stream.subscribe(function(next) {
             buffer[position] = next;
             options.setAttribute(buffer.join(''));
           });
 
-          if (stream.connect) stream.connect();
+          subscription.connect();
         },
 
         resolveInAttr: function(context, parts, buffer, options) {
@@ -1076,12 +1076,12 @@ define("htmlbars/runtime",
 
             var stream = helper.call(context, parts, options);
 
-            stream.subscribe(function(next) {
+            var subscription = stream.subscribe(function(next) {
               buffer[position] = next;
               options.setAttribute(buffer.join(''));
             });
 
-            if (stream.connect) stream.connect();
+            subscription.connect();
 
             return;
           }
@@ -1100,11 +1100,11 @@ define("htmlbars/runtime",
         },
 
         setAttr: function(element, name, stream) {
-          stream.subscribe(function(value) {
+          var subscription = stream.subscribe(function(value) {
             element.setAttribute(name, value);
           });
 
-          if (stream.connect) stream.connect();
+          subscription.connect();
         },
 
         stream: function(callback) {
@@ -1114,6 +1114,7 @@ define("htmlbars/runtime",
             subscribe: function(next) {
               subscriptions.push(next);
               if (hasValue) next(lastValue);
+              return { connect: function() {} };
             },
 
             next: function(value) {
