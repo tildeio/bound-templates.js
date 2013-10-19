@@ -156,21 +156,10 @@ define("bound-templates/stream",
         subscribers.forEach(function(sub) { if (sub.error) sub.error(reason); });
       }
 
-      var connected = true;
-
-      this.deferConnection = function() {
-        connected = false;
-      };
-
       var delegate = callback.call(this, next, complete, error) || {};
 
       this.subscribe = function(next, error, complete) {
         var subscriber = { next: next, error: error, complete: complete };
-        subscribers.push(subscriber);
-
-        if (connected) {
-          connect();
-        }
 
         function unsubscribe() {
           remove(subscribers, subscriber);
@@ -182,16 +171,18 @@ define("bound-templates/stream",
 
         function connect() {
           subscribers.push(subscriber);
-
-          if (delegate.subscribed) {
-            delegate.subscribed(subscriber);
-          }
-
+          publish();
           return subscription;
         }
 
+        function publish() {
+          if (delegate.subscribed) {
+            delegate.subscribed(subscriber);
+          }
+        }
+
         var subscription = { unsubscribe: unsubscribe };
-        subscription.connect = connected ? function() {} : connect;
+        subscription.connect = connect;
 
         return subscription;
       };
@@ -207,7 +198,7 @@ define("bound-templates/stream",
 
         return {
           subscribed: function() {
-            if (parentSubscription.connect) parentSubscription.connect();
+            parentSubscription.connect();
           }
         };
       });
@@ -222,6 +213,8 @@ define("bound-templates/stream",
           next(value);
         }, error, complete);
 
+        parentSubscription.connect();
+
         return {
           subscribed: function(subscriber) {
             subscriber.next(current);
@@ -230,7 +223,50 @@ define("bound-templates/stream",
       });
     }
 
-    __exports__.currentValue = currentValue;function remove(array, object) {
+    __exports__.currentValue = currentValue;function zipLatest(first, second, callback) {
+      var subscriptions = [];
+
+      var zipped = new Stream(function(next, error, complete) {
+        var currentFirst, currentSecond,
+            firstCompleted, secondCompleted;
+
+        subscriptions.push(first.subscribe(function(value) {
+          currentFirst = value;
+          next([currentFirst, currentSecond]);
+        }, error, function() {
+          firstCompleted = true;
+          possiblyComplete();
+        }));
+
+        subscriptions.push(second.subscribe(function(value) {
+          currentSecond = value;
+          next([currentFirst, currentSecond]);
+        }, error, function() {
+          secondCompleted = true;
+          possiblyComplete();
+        }));
+
+        function possiblyComplete() {
+          if (firstCompleted && secondCompleted) complete();
+        }
+
+        return {
+          subscribed: function() {
+            subscriptions.forEach(function(sub) { sub.connect(); });
+          }
+        };
+      });
+
+      if (callback) {
+        return map(zipped, function(values) {
+          return callback.apply(this, values);
+        });
+      } else {
+        return zipped;
+      }
+    }
+
+    __exports__.zipLatest = zipLatest;function remove(array, object) {
       var index = array.indexOf(object);
       if (index === -1) return;
       array.splice(index, 1);

@@ -1,7 +1,7 @@
 import { compileSpec, hydrate } from "bound-templates/compiler";
 import { test, module } from "test_helpers";
 import { merge } from "htmlbars/utils";
-import { default as Stream, map, currentValue } from "bound-templates/stream";
+import { default as Stream, map, currentValue, zipLatest } from "bound-templates/stream";
 import HTMLElement from "bound-templates/wrappers/html-element";
 
 function equalHTML(fragment, html) {
@@ -28,17 +28,15 @@ function compile(string, options) {
 }
 
 function PathObserver(model, path) {
-  var observer = this;
+  var delegate = this;
 
   var stream = new Stream(function(next) {
     addObserver(model, path, function() {
-      var value = observer.currentValue = model[path];
+      var value = delegate.currentValue = model[path];
       next(value);
     });
 
-    this.deferConnection();
-
-    return observer;
+    return delegate;
   });
 
   this.currentValue = model[path];
@@ -150,13 +148,12 @@ test("Attribute helpers are can return streams", function() {
   var template = compile('<a href="{{link-to \'post\' id}}">post</a>', {
     helpers: {
       "link-to": function(path, model, options) {
-        // ZOMG FAIL
         equal(options.types[0], 'string', "Types should be passed along");
         equal(options.types[1], 'id', "Types should be passed along");
 
-        return currentValue(map(new PathObserver(this, model), function(value) {
+        return map(new PathObserver(this, model), function(value) {
           return "/posts/" + value;
-        }));
+        });
       }
     }
   });
@@ -165,4 +162,42 @@ test("Attribute helpers are can return streams", function() {
       fragment = template(model);
 
   equalHTML(fragment, '<a href="/posts/1">post</a>');
+
+  model.id = 2;
+  notify(model, 'id');
+
+  equalHTML(fragment, '<a href="/posts/2">post</a>');
+});
+
+test("Attribute helpers can merge path streams", function() {
+  var template = compile('<a href="{{link-to host=host path=path}}">post</a>', {
+    helpers: {
+      "link-to": function(options) {
+        equal(options.hashTypes.host, "id");
+        equal(options.hashTypes.path, "id");
+
+        var hash = options.hash;
+
+        var hostStream = new PathObserver(this, hash.host),
+            pathStream = new PathObserver(this, hash.path);
+
+        return zipLatest(hostStream, pathStream, function(host, path) {
+          return "http://" + host + "/" + path;
+        });
+      }
+    }
+  });
+
+  var model = { host: "example.com", path: "hello" },
+      fragment = template(model);
+
+  equalHTML(fragment, '<a href="http://example.com/hello">post</a>');
+
+  model.host = "www.example.com";
+  model.path = "goodbye";
+
+  notify(model, 'host');
+  notify(model, 'path');
+
+  equalHTML(fragment, '<a href="http://www.example.com/goodbye">post</a>');
 });
