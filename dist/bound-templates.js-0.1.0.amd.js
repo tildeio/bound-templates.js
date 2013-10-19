@@ -89,57 +89,105 @@ define("bound-templates/stream",
   function(__exports__) {
     "use strict";
     function Stream(callback) {
-      var nexts = [], completes = [], errors = [];
+      var subscribers = [];
 
       function next(value) {
-        nexts.forEach(function(nextCallback) { nextCallback(value); });
+        subscribers.forEach(function(sub) { if (sub.next) sub.next(value); });
       }
 
       function complete() {
-        completes.forEach(function(completeCallback) { completeCallback(); });
+        subscribers.forEach(function(sub) { if (sub.complete) sub.complete(); });
       }
 
       function error(reason) {
-        errors.forEach(function(errorCallback) { errorCallback(reason); });
+        subscribers.forEach(function(sub) { if (sub.error) sub.error(reason); });
       }
 
-      var handler = callback(next, complete, error) || {};
+      var connected = false;
+
+      this.connect = function() {
+        connected = true;
+
+        // The callback can call connect(), and then there are obviously
+        // no subscribers yet.
+        if (delegate && delegate.subscribed) {
+          subscribers.forEach(delegate.subscribed, delegate);
+        }
+      };
+
+      var delegate = callback.call(this, next, complete, error) || {};
 
       this.subscribe = function(next, error, complete) {
-        var callbacks = { next: next, error: error, complete: complete },
-            handledCallbacks = callbacks;
+        var subscriber = { next: next, error: error, complete: complete };
+        subscribers.push(subscriber);
 
-        // Give a custom subscriber implementation a chance to wrap
-        // the callbacks. For example, it may use this to cache the
-        // current value or share a single interval across all
-        // subscribers.
-        if (handler.subscribed) {
-          handledCallbacks = handler.subscribed(callbacks) || callbacks;
-        }
+        if (connected) { connect(); }
 
-        if (handledCallbacks.next) nexts.push(handledCallbacks.next);
-        if (handledCallbacks.error) errors.push(handledCallbacks.error);
-        if (handledCallbacks.complete) completes.push(handledCallbacks.complete);
-
-        return function() {
-          remove(nexts, n);
-          remove(errors, e);
-          remove(completes, c);
+        function unsubscribe() {
+          remove(subscribers, subscriber);
 
           // Send unsubscribed the original callbacks, which it may have
           // stashed some state on or put into a Map/WeakMap.
-          if (handler.unsubscribed) handler.unsubscribed(callbacks);
-        };
+          if (delegate.unsubscribed) delegate.unsubscribed(subscriber);
+        }
+
+        function connect() {
+          if (delegate.subscribed) {
+            subscribers.forEach(delegate.subscribed, delegate);
+          }
+
+          return subscription;
+        }
+
+        var subscription = { unsubscribe: unsubscribe, connect: connect };
+
+        return subscription;
       };
+
     }
 
-    function remove(array, object) {
+    __exports__['default'] = Stream;
+
+    function map(parent, callback, binding) {
+      return new Stream(function(next, error, complete) {
+        var parentSubscription = parent.subscribe(function(value) {
+          next(callback.call(binding, value));
+        }, error, complete);
+
+        this.connect();
+
+        return {
+          subscribed: function() {
+            parentSubscription.connect();
+          }
+        };
+      });
+    }
+
+    __exports__.map = map;function currentValue(parent) {
+      return new Stream(function(next, error, complete) {
+        var current;
+
+        var parentSubscription = parent.subscribe(function(value) {
+          current = value;
+          next(value);
+        }, error, complete);
+
+        this.connect();
+
+        return {
+          subscribed: function(subscriber) {
+            subscriber.next(current);
+          }
+        };
+      });
+    }
+
+    __exports__.currentValue = currentValue;function remove(array, object) {
       var index = array.indexOf(object);
       if (index === -1) return;
       array.splice(index, 1);
     }
-
-    __exports__['default'] = Stream;
   });
 
 define("bound-templates/wrappers/document-fragment", 
@@ -193,6 +241,8 @@ define("bound-templates/wrappers/text-node",
         stream.subscribe(function(value) {
           node[attribute] = value;
         });
+
+        if (stream.connect) stream.connect();
       }
     };
 

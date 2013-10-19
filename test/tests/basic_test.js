@@ -1,7 +1,7 @@
 import { compileSpec, hydrate } from "bound-templates/compiler";
 import { test, module } from "test_helpers";
 import { merge } from "htmlbars/utils";
-import Stream from "bound-templates/stream";
+import { default as Stream, map, currentValue } from "bound-templates/stream";
 import HTMLElement from "bound-templates/wrappers/html-element";
 
 function equalHTML(fragment, html) {
@@ -22,7 +22,8 @@ function compile(string, options) {
   var extensions = options.extensions || {};
 
   return hydrate(spec, {
-    extensions: merge(extensions, defaultExtensions)
+    extensions: merge(extensions, defaultExtensions),
+    helpers: options.helpers
   });
 }
 
@@ -40,6 +41,7 @@ function PathObserver(model, path) {
 
   this.currentValue = model[path];
   this.subscribe = stream.subscribe;
+  this.connect = stream.connect;
 }
 
 PathObserver.prototype = {
@@ -141,4 +143,25 @@ test("Attribute runs can be updated when the model changes", function() {
   notify(model, 'path');
 
   equalHTML(fragment, '<a href="http://www.example.com/goodbye">hello</a>');
+});
+
+test("Attribute helpers are can return streams", function() {
+  var template = compile('<a href="{{link-to \'post\' id}}">post</a>', {
+    helpers: {
+      "link-to": function(path, model, options) {
+        // ZOMG FAIL
+        equal(options.types[0], 'string', "Types should be passed along");
+        equal(options.types[1], 'id', "Types should be passed along");
+
+        return currentValue(map(new PathObserver(this, model), function(value) {
+          return "/posts/" + value;
+        }));
+      }
+    }
+  });
+
+  var model = { id: 1 },
+      fragment = template(model);
+
+  equalHTML(fragment, '<a href="/posts/1">post</a>');
 });

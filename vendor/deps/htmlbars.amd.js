@@ -229,13 +229,13 @@ define("htmlbars/compiler/helpers",
 
       for (i=0; i<hashSize; i++) {
         keyName = popStack(stack);
-        hashPairs.push(keyName + ':' + popStack(stack));
-        hashTypes.push(keyName + ':' + popStack(stack));
+        hashPairs.unshift(keyName + ':' + popStack(stack));
+        hashTypes.unshift(keyName + ':' + popStack(stack));
       }
 
       for (i=0; i<size; i++) {
-        args.push(popStack(stack));
-        types.push(popStack(stack));
+        args.unshift(popStack(stack));
+        types.unshift(popStack(stack));
       }
 
       var programId = popStack(stack);
@@ -1061,6 +1061,8 @@ define("htmlbars/runtime",
             buffer[position] = next;
             options.setAttribute(buffer.join(''));
           });
+
+          if (stream.connect) stream.connect();
         },
 
         resolveInAttr: function(context, parts, buffer, options) {
@@ -1079,6 +1081,8 @@ define("htmlbars/runtime",
               options.setAttribute(buffer.join(''));
             });
 
+            if (stream.connect) stream.connect();
+
             return;
           }
 
@@ -1090,15 +1094,17 @@ define("htmlbars/runtime",
         },
 
         setAttribute: function(element, name, value, options) {
-          this.setAttr(element, name, options.stream.subscribe);
+          this.setAttr(element, name, options.stream);
 
           options.stream.next(value);
         },
 
-        setAttr: function(element, name, subscribe) {
-          subscribe(function(value) {
+        setAttr: function(element, name, stream) {
+          stream.subscribe(function(value) {
             element.setAttribute(name, value);
           });
+
+          if (stream.connect) stream.connect();
         },
 
         stream: function(callback) {
