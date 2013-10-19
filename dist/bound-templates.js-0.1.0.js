@@ -80,6 +80,10 @@ define("bound-templates/compiler",
 
         textNode.bind('textContent', stream);
         options.append(textNode);
+      },
+
+      RESOLVE_IN_ATTR: function(parts, options) {
+        return new options.dom.PathObserver(this, parts.join("."));
       }
     };
 
@@ -216,6 +220,10 @@ define("bound-templates/wrappers/html-element",
 
     HTMLElement.prototype.appendChild = function(child) {
       this.node.appendChild(child.node);
+    };
+
+    HTMLElement.prototype.setAttribute = function(name, value) {
+      this.node.setAttribute(name, value);
     };
 
     __exports__['default'] = HTMLElement;
