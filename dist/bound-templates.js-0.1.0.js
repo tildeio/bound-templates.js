@@ -59,15 +59,16 @@ define("bound-templates",
   });
 
 define("bound-templates/compiler", 
-  ["htmlbars/compiler","htmlbars/runtime","htmlbars/utils","bound-templates/wrappers/text-node","bound-templates/wrappers/html-element","bound-templates/wrappers/document-fragment","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __exports__) {
+  ["htmlbars/compiler","htmlbars/runtime","htmlbars/utils","bound-templates/stream","bound-templates/wrappers/text-node","bound-templates/wrappers/html-element","bound-templates/wrappers/document-fragment","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __exports__) {
     "use strict";
     var compileSpec = __dependency1__.compileSpec;
     var hydrateTemplate = __dependency2__.hydrate;
     var merge = __dependency3__.merge;
-    var TextNode = __dependency4__['default'];
-    var HTMLElement = __dependency5__['default'];
-    var DocumentFragment = __dependency6__['default'];
+    var whenChanged = __dependency4__.whenChanged;
+    var TextNode = __dependency5__['default'];
+    var HTMLElement = __dependency6__['default'];
+    var DocumentFragment = __dependency7__['default'];
 
     function compileSpec(string, options) {
       return compileSpec(string, options || {});
@@ -112,6 +113,10 @@ define("bound-templates/compiler",
 
         wrapper.node = fragment;
         return wrapper;
+      },
+
+      throttle: function(stream) {
+        return whenChanged(stream);
       }
     };
 
@@ -223,7 +228,28 @@ define("bound-templates/stream",
       });
     }
 
-    __exports__.currentValue = currentValue;function zipLatest(first, second, callback) {
+    __exports__.currentValue = currentValue;function whenChanged(parent) {
+      return new Stream(function(next, error, complete) {
+        var current;
+
+        var parentSubscription = parent.subscribe(function(value) {
+          if (current === value) { return; }
+
+          current = value;
+          next(value);
+        }, error, complete);
+
+        parentSubscription.connect();
+
+        return {
+          subscribed: function(subscriber) {
+            subscriber.next(current);
+          }
+        };
+      });
+    }
+
+    __exports__.whenChanged = whenChanged;function zipLatest(first, second, callback) {
       var subscriptions = [];
 
       var zipped = new Stream(function(next, error, complete) {
@@ -301,6 +327,7 @@ define("bound-templates/wrappers/html-element",
     };
 
     HTMLElement.prototype.setAttribute = function(name, value) {
+      console.log(name, value);
       this.node.setAttribute(name, value);
     };
 
