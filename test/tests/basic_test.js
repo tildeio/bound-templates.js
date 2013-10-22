@@ -1,67 +1,8 @@
-import { compileSpec, hydrate } from "bound-templates/compiler";
-import { test, module } from "test_helpers";
-import { merge } from "htmlbars/utils";
-import { default as Stream, map, currentValue, zipLatest } from "bound-templates/stream";
-import HTMLElement from "bound-templates/wrappers/html-element";
-
-function equalHTML(fragment, html) {
-  var div = document.createElement("div");
-  div.appendChild(fragment.node.cloneNode(true));
-
-  equal(div.innerHTML, html);
-}
-
-function compile(string, options) {
-  var spec = compileSpec(string);
-
-  var defaultExtensions = {
-    PathObserver: PathObserver
-  };
-
-  options = options || {};
-  var extensions = options.extensions || {};
-
-  return hydrate(spec, {
-    extensions: merge(extensions, defaultExtensions),
-    helpers: options.helpers
-  });
-}
-
-function PathObserver(model, path) {
-  var delegate = this;
-
-  var stream = new Stream(function(next) {
-    addObserver(model, path, function() {
-      var value = delegate.currentValue = model[path];
-      next(value);
-    });
-
-    return delegate;
-  });
-
-  this.currentValue = model[path];
-  this.subscribe = stream.subscribe;
-}
-
-PathObserver.prototype = {
-  constructor: PathObserver,
-
-  subscribed: function(callbacks) {
-    callbacks.next(this.currentValue);
-  }
-};
-
-function addObserver(model, path, callback) {
-  model.__observers = model.__observers || {};
-  model.__observers[path] = model.__observers[path] || [];
-  model.__observers[path].push(callback);
-}
-
-function notify(model, path) {
-  model.__observers[path].forEach(function(callback) {
-    callback();
-  });
-}
+import { module, test, equal } from "test_helpers";
+import { equalHTML } from "test_helpers";
+import { compile, HTMLElement, PathObserver } from "test_helpers";
+import { notify } from "test_helpers";
+import { map, zipLatest } from "test_helpers";
 
 module("Basic test", {
   setup: function() {
