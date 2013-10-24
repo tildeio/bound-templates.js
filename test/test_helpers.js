@@ -62,20 +62,19 @@ export function PathObserver(model, path) {
       var value = delegate.currentValue = model[path];
       next(value);
     });
-
-    return delegate;
   });
 
   this.currentValue = model[path];
-  this.subscribe = stream.subscribe;
+
+  this.subscribe = function(next) {
+    var unsubscribe = stream.subscribe.apply(stream, arguments);
+    next(this.currentValue);
+    return unsubscribe;
+  };
 }
 
 PathObserver.prototype = {
-  constructor: PathObserver,
-
-  subscribed: function(callbacks) {
-    callbacks.next(this.currentValue);
-  }
+  constructor: PathObserver
 };
 
 export function addObserver(model, path, callback) {

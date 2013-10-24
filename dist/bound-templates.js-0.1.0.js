@@ -185,6 +185,30 @@ define("bound-templates/stream",
   ["exports"],
   function(__exports__) {
     "use strict";
+    /**
+      @function Stream
+      @param {Function[Next, Error, Complete]->void} callback
+
+      Creates a new stream. Calls the callback with functions that will
+      invoke the `next`, `error` and `complete` callbacks on subscribers.
+
+      Example:
+
+      ```js
+      var interval = new Stream(function(next, error, complete) {
+        setInterval(function() {
+          next("tick");
+        }, 1000);
+      });
+
+      interval.subscribe(function(val) {
+        // this will get triggered every second with the value "tick"
+      });
+      ```
+
+      The `subscribe` method on the newly created stream returns a function
+      that can be used to unsubscribe.
+    */
     function Stream(callback) {
       var subscribers = [];
 
@@ -200,126 +224,111 @@ define("bound-templates/stream",
         subscribers.forEach(function(sub) { if (sub.error) sub.error(reason); });
       }
 
-      var delegate = callback.call(this, next, complete, error) || {};
-
       this.subscribe = function(next, error, complete) {
         var subscriber = { next: next, error: error, complete: complete };
+        subscribers.push(subscriber);
 
-        function unsubscribe() {
+        return function() {
           remove(subscribers, subscriber);
-
-          // Send unsubscribed the original callbacks, which it may have
-          // stashed some state on or put into a Map/WeakMap.
-          if (delegate.unsubscribed) delegate.unsubscribed(subscriber);
-        }
-
-        function connect() {
-          subscribers.push(subscriber);
-          publish();
-          return subscription;
-        }
-
-        function publish() {
-          if (delegate.subscribed) {
-            delegate.subscribed(subscriber);
-          }
-        }
-
-        var subscription = { unsubscribe: unsubscribe };
-        subscription.connect = connect;
-
-        return subscription;
+        };
       };
+
+      callback.call(this, next, error, complete);
     }
 
     __exports__['default'] = Stream;
 
-    function map(parent, callback, binding) {
+    function lazy(subscribeCallback) {
       return new Stream(function(next, error, complete) {
-        var parentSubscription = parent.subscribe(function(value) {
+        var subscribe = this.subscribe;
+
+        this.subscribe = function() {
+          var unsubscribe = subscribe.apply(this, arguments);
+          subscribeCallback(next, error, complete);
+          return unsubscribe;
+        };
+      });
+    }
+
+    __exports__.lazy = lazy;function lifecycle(callbacks) {
+      return new Stream(function(next, error, complete) {
+        var subscribe = this.subscribe;
+
+        var subscribers = 0;
+
+        this.subcribe = function() {
+          var unsubscribe = subscribe.apply(this, arguments);
+          if (subscribers++ === 0) {
+            callbacks.activate.call(this);
+          }
+
+          return function() {
+            unsubscribe();
+            if (--subscribers === 0) {
+              callbacks.deactivate.call(this);
+            }
+          };
+        };
+      });
+    }
+
+    __exports__.lifecycle = lifecycle;function map(parent, callback, binding) {
+      return lazy(function(next, error, complete) {
+        parent.subscribe(function(value) {
           next(callback.call(binding, value));
         }, error, complete);
-
-        return {
-          subscribed: function() {
-            parentSubscription.connect();
-          }
-        };
       });
     }
 
     __exports__.map = map;function currentValue(parent) {
-      return new Stream(function(next, error, complete) {
+      return lazy(function(next, error, complete) {
         var current;
 
-        var parentSubscription = parent.subscribe(function(value) {
+        parent.subscribe(function(value) {
           current = value;
           next(value);
         }, error, complete);
-
-        parentSubscription.connect();
-
-        return {
-          subscribed: function(subscriber) {
-            subscriber.next(current);
-          }
-        };
       });
     }
 
     __exports__.currentValue = currentValue;function whenChanged(parent) {
-      return new Stream(function(next, error, complete) {
+      return lazy(function(next, error, complete) {
         var current;
 
-        var parentSubscription = parent.subscribe(function(value) {
-          if (current === value) { return; }
+        parent.subscribe(function(value) {
+          if (current === value) return;
 
           current = value;
           next(value);
         }, error, complete);
-
-        parentSubscription.connect();
-
-        return {
-          subscribed: function(subscriber) {
-            subscriber.next(current);
-          }
-        };
       });
     }
 
     __exports__.whenChanged = whenChanged;function zipLatest(first, second, callback) {
       var subscriptions = [];
+      var values = [], completed = [];
 
-      var zipped = new Stream(function(next, error, complete) {
-        var currentFirst, currentSecond,
-            firstCompleted, secondCompleted;
+      var zipped = lazy(function(next, error, complete, subscription) {
+        subscriptions.push(subscription);
 
-        subscriptions.push(first.subscribe(function(value) {
-          currentFirst = value;
-          next([currentFirst, currentSecond]);
-        }, error, function() {
-          firstCompleted = true;
-          possiblyComplete();
-        }));
+        subscribe(first, 0);
+        subscribe(second, 1);
 
-        subscriptions.push(second.subscribe(function(value) {
-          currentSecond = value;
-          next([currentFirst, currentSecond]);
-        }, error, function() {
-          secondCompleted = true;
-          possiblyComplete();
-        }));
+        function subscribe(stream, position) {
+          completed[position] = false;
 
-        function possiblyComplete() {
-          if (firstCompleted && secondCompleted) complete();
+          return stream.subscribe(function(value) {
+            values[position] = value;
+            next(values);
+          }, error, function() {
+            completed[position] = true;
+            possiblyComplete();
+          });
         }
 
-        return {
-          subscribed: function() {
-            subscriptions.forEach(function(sub) { sub.connect(); });
-          }
-        };
+        function possiblyComplete() {
+          if (completed.every(function(value) { return value; })) complete();
+        }
       });
 
       if (callback) {
@@ -405,7 +414,7 @@ define("bound-templates/wrappers/range",
         var frag = dom.frag(parent, value);
 
         replace(range.startNode, range.endNode, frag);
-      }).connect();
+      });
     };
 
     function bindNodes(range, stream) {
@@ -415,7 +424,7 @@ define("bound-templates/wrappers/range",
 
       stream.subscribe(function(value) {
         replace(range.startNode, range.endNode, value);
-      }).connect();
+      });
     }
 
     function replace(first, last, frag) {
@@ -447,11 +456,9 @@ define("bound-templates/wrappers/text-node",
       bind: function(attribute, stream) {
         var node = this.node;
 
-        var subscription = stream.subscribe(function(value) {
+        stream.subscribe(function(value) {
           node[attribute] = value;
         });
-
-        subscription.connect();
       }
     };
 
