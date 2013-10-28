@@ -130,8 +130,7 @@ test("Attribute helpers can merge path streams", function() {
 });
 
 test("Attribute runs can be updated when the model path changes", function() {
-  var template = compile('<a href="http://{{host.url}}/{{path.url}}">hello</a>');
-  debugger
+  var template = compile('<a href="http://{{host.url}}/{{path.name}}">hello</a>');
   var model = {
           host: { url: "example.com" },
           path: { name: "hello" }
@@ -140,11 +139,11 @@ test("Attribute runs can be updated when the model path changes", function() {
 
   equalHTML(fragment, '<a href="http://example.com/hello">hello</a>');
 
-  model.host = "www.example.com";
-  model.path = "goodbye";
-  notify(model, 'host');
-  notify(model, 'path');
+  model.host.url = "www.example2.com";
+  model.path.name = "goodbye";
+  notify(model, 'host.url');
+  notify(model, 'path.name');
 
-  equalHTML(fragment, '<a href="http://www.example.com/goodbye">hello</a>');
+  equalHTML(fragment, '<a href="http://www.example2.com/goodbye">hello</a>');
 });
 

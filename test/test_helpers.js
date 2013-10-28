@@ -56,17 +56,36 @@ export function compile(string, options) {
   });
 }
 
+export function get(model, path) {
+  var parts  = {},
+      result = {};
+
+  if (typeof path !== 'string') {
+    parts = path[0];
+    result = model[parts];
+  } else {
+    parts = path.split('.');
+    result = model[parts[0]];
+
+    for (var i = 1, l = parts.length; i < l; i++) {
+      result = result[parts[i]];
+    }
+  }
+
+  return result;
+}
+
 export function PathObserver(model, path) {
   var delegate = this;
 
   var stream = new Stream(function(next) {
     addObserver(model, path, function() {
-      var value = delegate.currentValue = model[path];
+      var value = delegate.currentValue = get(model,path);
       next(value);
     });
   });
 
-  this.currentValue = model[path];
+  this.currentValue = get(model, path);
 
   this.subscribe = function(next) {
     var unsubscribe = stream.subscribe.apply(stream, arguments);
