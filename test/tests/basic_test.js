@@ -55,20 +55,6 @@ test("Curlies can be updated when the model changes", function() {
   equalHTML(fragment, "<p>goodbye cruel world</p>");
 });
 
-test("Attributes can be updated when the model changes", function() {
-  var template = compile('<a href="{{url}}">hello</a>');
-
-  var model = { url: "http://example.com/hello" },
-      fragment = template(model);
-
-  equalHTML(fragment, '<a href="http://example.com/hello">hello</a>');
-
-  model.url = "http://example.com/goodbye";
-  notify(model, 'url');
-
-  equalHTML(fragment, '<a href="http://example.com/goodbye">hello</a>');
-});
-
 test("Attribute runs can be updated when the model changes", function() {
   var template = compile('<a href="http://{{host}}/{{path}}">hello</a>');
 
@@ -142,3 +128,23 @@ test("Attribute helpers can merge path streams", function() {
 
   equalHTML(fragment, '<a href="http://www.example.com/goodbye">post</a>');
 });
+
+test("Attribute runs can be updated when the model path changes", function() {
+  var template = compile('<a href="http://{{host.url}}/{{path.url}}">hello</a>');
+  debugger
+  var model = {
+          host: { url: "example.com" },
+          path: { name: "hello" }
+      },
+      fragment = template(model);
+
+  equalHTML(fragment, '<a href="http://example.com/hello">hello</a>');
+
+  model.host = "www.example.com";
+  model.path = "goodbye";
+  notify(model, 'host');
+  notify(model, 'path');
+
+  equalHTML(fragment, '<a href="http://www.example.com/goodbye">hello</a>');
+});
+
