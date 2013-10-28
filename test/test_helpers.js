@@ -23,6 +23,8 @@ export var test = window.test;
 export var module = window.module;
 export var ok = window.ok;
 export var equal = window.equal;
+export var deepEqual = window.deepEqual;
+export var strictEqual = window.strictEqual;
 
 import { compileSpec, hydrate } from "bound-templates/compiler";
 import { merge } from "htmlbars/utils";
