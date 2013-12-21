@@ -26,7 +26,8 @@ export var equal = window.equal;
 export var deepEqual = window.deepEqual;
 export var strictEqual = window.strictEqual;
 
-import { compileSpec, hydrate } from "bound-templates/compiler";
+import { compileSpec } from "htmlbars/compiler";
+import { hydrate } from "bound-templates/compiler";
 import { merge } from "htmlbars/utils";
 import { default as Stream, map, zipLatest } from "bound-templates/stream";
 import HTMLElement from "bound-templates/wrappers/html-element";

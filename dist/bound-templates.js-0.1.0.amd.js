@@ -6,23 +6,18 @@ define("bound-templates",
   });
 
 define("bound-templates/compiler", 
-  ["htmlbars/compiler","htmlbars/runtime","htmlbars/utils","bound-templates/stream","bound-templates/wrappers/text-node","bound-templates/wrappers/html-element","bound-templates/wrappers/range","bound-templates/wrappers/document-fragment","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __exports__) {
+  ["htmlbars/runtime","htmlbars/utils","bound-templates/stream","bound-templates/wrappers/text-node","bound-templates/wrappers/html-element","bound-templates/wrappers/range","bound-templates/wrappers/document-fragment","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __exports__) {
     "use strict";
-    var compileSpec = __dependency1__.compileSpec;
-    var hydrateTemplate = __dependency2__.hydrate;
-    var merge = __dependency3__.merge;
-    var whenChanged = __dependency4__.whenChanged;
-    var TextNode = __dependency5__['default'];
-    var HTMLElement = __dependency6__['default'];
-    var Range = __dependency7__['default'];
-    var DocumentFragment = __dependency8__['default'];
+    var hydrateTemplate = __dependency1__.hydrate;
+    var merge = __dependency2__.merge;
+    var whenChanged = __dependency3__.whenChanged;
+    var TextNode = __dependency4__["default"];
+    var HTMLElement = __dependency5__["default"];
+    var Range = __dependency6__["default"];
+    var DocumentFragment = __dependency7__["default"];
 
-    function compileSpec(string, options) {
-      return compileSpec(string, options || {});
-    }
-
-    __exports__.compileSpec = compileSpec;function resolveHTML(model, parts, options) {
+    function resolveHTML(model, parts, options) {
       var stream = new options.dom.PathObserver(model, parts.join(".")),
           range = new Range(options.element, options.dom);
 
@@ -369,7 +364,7 @@ define("bound-templates/stream",
       callback.call(this, next, error, complete);
     }
 
-    __exports__['default'] = Stream;
+    __exports__["default"] = Stream;
 
     function lazy(subscribeCallback) {
       return new Stream(function(next, error, complete) {
@@ -496,7 +491,7 @@ define("bound-templates/wrappers/document-fragment",
       }
     };
 
-    __exports__['default'] = DocumentFragment;
+    __exports__["default"] = DocumentFragment;
   });
 
 define("bound-templates/wrappers/html-element", 
@@ -519,7 +514,7 @@ define("bound-templates/wrappers/html-element",
       this.node.setAttribute(name, value);
     };
 
-    __exports__['default'] = HTMLElement;
+    __exports__["default"] = HTMLElement;
   });
 
 define("bound-templates/wrappers/range", 
@@ -572,7 +567,7 @@ define("bound-templates/wrappers/range",
       parent.insertBefore(frag.node, last);
     }
 
-    __exports__['default'] = Range;
+    __exports__["default"] = Range;
   });
 
 define("bound-templates/wrappers/text-node", 
@@ -595,5 +590,5 @@ define("bound-templates/wrappers/text-node",
       }
     };
 
-    __exports__['default'] = TextNode;
+    __exports__["default"] = TextNode;
   });
