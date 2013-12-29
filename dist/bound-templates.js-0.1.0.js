@@ -169,13 +169,6 @@ define("bound-templates/compiler",
     __exports__.hydrate = hydrate;
   });
 
-define("bound-templates/path_observer", 
-  [],
-  function() {
-    "use strict";
-
-  });
-
 define("bound-templates/skip_list", 
   ["exports"],
   function(__exports__) {
