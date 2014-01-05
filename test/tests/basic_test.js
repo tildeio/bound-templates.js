@@ -20,7 +20,7 @@ test("Basic curlies insert the contents of the curlies", function() {
 
   equalHTML(template({ hello: "hello world" }), "<p>hello world</p>");
 });
-
+/*
 test("Curlies are data-bound using the specified wrapper", function() {
   function TestHTMLElement(name) {
     HTMLElement.call(this, name);
@@ -29,18 +29,13 @@ test("Curlies are data-bound using the specified wrapper", function() {
 
   TestHTMLElement.prototype = Object.create(HTMLElement.prototype);
 
-  var template = compile("<p>{{hello}}</p>", {
-    extensions: {
-      HTMLElement: TestHTMLElement
-    }
-  });
-
+  var template = compile("<p>{{hello}}</p>");
   var model = { hello: "hello world" },
       fragment = template(model);
 
   equalHTML(fragment, "<p data-test-success=\"true\">hello world</p>");
 });
-
+*/
 test("Curlies can be updated when the model changes", function() {
   var template = compile("<p>{{hello}}</p>");
 
@@ -54,7 +49,7 @@ test("Curlies can be updated when the model changes", function() {
 
   equalHTML(fragment, "<p>goodbye cruel world</p>");
 });
-
+/*
 test("Attribute runs can be updated when the model changes", function() {
   var template = compile('<a href="http://{{host}}/{{path}}">hello</a>');
 
@@ -146,4 +141,20 @@ test("Attribute runs can be updated when the model path changes", function() {
 
   equalHTML(fragment, '<a href="http://www.example2.com/goodbye">hello</a>');
 });
+*/
 
+test("Helper arguments get properly converted to streams when appropriate", function() {
+  expect(4);
+
+  var template = compile('<div>{{testing "foo" bar baz=qux seems="good"}}</div>');
+  template({bar: "bar", qux: "qux"}, {
+    helpers: {
+      testing: function(params, options) {
+        equal(params[0], 'foo');
+        ok(params[1] instanceof PathObserver);
+        ok(options.hash.baz instanceof PathObserver);
+        equal(options.hash.seems, 'good');
+      }
+    }
+  });
+});

@@ -1,6 +1,7 @@
 import { module, test, equal } from "test_helpers";
 import { compile, equalHTML, notify } from "test_helpers";
-import { PathObserver, map } from "test_helpers";
+import { PathObserver, FragmentStream, map } from "test_helpers";
+import { default as Stream } from "bound-templates/stream";
 
 module("Fragment Test", {
 
@@ -28,15 +29,13 @@ test("Triple curlies can be updated when they change", function() {
 test("Block helpers can work and get updated", function() {
   var template = compile("{{#if truthy}}<p>Yep!</p>{{else}}<p>Nope!</p>{{/if}}", {
     helpers: {
-      "if": function(path, options) {
-        var context = this;
+      "if": function(params, options) {
+        var paramStream = params[0];
 
-        return map(new PathObserver(this, path), function(value) {
-          if (value) {
-            return options.render(context);
-          } else {
-            return options.inverse(context);
-          }
+        return new FragmentStream(function(next) {
+          paramStream.subscribe(function(value) {
+            next(value ? options.render(options) : options.inverse(options));
+          });
         });
       }
     }

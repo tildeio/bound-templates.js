@@ -20,12 +20,11 @@ define("htmlbars",
     __exports__.removeMacro = removeMacro;
     __exports__.registerMacro = registerMacro;
   });
-
 define("htmlbars/ast", 
   ["handlebars/compiler/ast","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
-    var AST = __dependency1__;
+    var MustacheNode = __dependency1__.MustacheNode;
 
     function HTMLElement(tag, attributes, children, helpers) {
       this.tag = tag;
@@ -42,6 +41,14 @@ define("htmlbars/ast",
     }
 
     function appendChild(node) {
+      var len = this.children.length,
+          lastNode = len > 0 ? this.children[len - 1] : null;
+
+      // Back to back MustacheNodes need an empty text node delimiter
+      if (lastNode && node instanceof MustacheNode && lastNode instanceof MustacheNode) {
+        this.children.push('');
+      }
+
       this.children.push(node);
     }
 
@@ -62,7 +69,7 @@ define("htmlbars/ast",
 
       getAttr: function(name) {
         var attributes = this.attributes;
-        if (attributes.length !== 1 || attributes[0] instanceof AST.MustacheNode) { return; }
+        if (attributes.length !== 1 || attributes[0] instanceof MustacheNode) { return; }
         return attributes[name][0];
       }
     };
@@ -77,9 +84,8 @@ define("htmlbars/ast",
     __exports__.HTMLElement = HTMLElement;
     __exports__.BlockElement = BlockElement;
   });
-
 define("htmlbars/compiler", 
-  ["htmlbars/parser","htmlbars/compiler/utils","htmlbars/runtime","htmlbars/helpers","exports"],
+  ["htmlbars/parser","htmlbars/compiler/compile","htmlbars/runtime","htmlbars/helpers","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
     var preprocess = __dependency1__.preprocess;
@@ -98,7 +104,6 @@ define("htmlbars/compiler",
 
     __exports__.compileSpec = compileSpec;
   });
-
 define("htmlbars/compiler/attr", 
   ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/stack","htmlbars/compiler/quoting","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
@@ -190,7 +195,25 @@ define("htmlbars/compiler/attr",
 
     __exports__.AttrCompiler = AttrCompiler;
   });
+define("htmlbars/compiler/compile", 
+  ["htmlbars/compiler/pass1","htmlbars/compiler/pass2","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
+    "use strict";
+    var Compiler1 = __dependency1__.Compiler1;
+    var Compiler2 = __dependency2__.Compiler2;
 
+    function compileAST(ast, options) {
+      var compiler1 = new Compiler1(compileAST, options),
+          compiler2 = new Compiler2(options);
+
+      var opcodes = compiler1.compile(ast);
+      return compiler2.compile(opcodes, {
+        children: compiler1.children
+      });
+    }
+
+    __exports__.compileAST = compileAST;
+  });
 define("htmlbars/compiler/elements", 
   ["exports"],
   function(__exports__) {
@@ -208,7 +231,187 @@ define("htmlbars/compiler/elements",
     }
     __exports__.topElement = topElement;
   });
+define("htmlbars/compiler/fragment", 
+  ["htmlbars/ast","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var HTMLElement = __dependency1__.HTMLElement;
+    var BlockElement = __dependency1__.BlockElement;
 
+    function Fragment() {}
+
+    var prototype = Fragment.prototype;
+
+    prototype.compile = function(ast) {
+      this.opcodes = [];
+      this.children = [];
+      processChildren(this, ast);
+      return {
+        opcodes: this.opcodes,
+        children: this.children
+      };
+    };
+
+    function processChildren(compiler, children) {
+      var node, lastNode;
+
+      for (var i=0, l=children.length; i<l; i++) {
+        node = children[i];
+
+        if (typeof node === 'string') {
+          compiler.string(node);
+        } else if (node instanceof HTMLElement) {
+          compiler.element(node);
+        } else if (node instanceof BlockElement) {
+          compiler.block(node);
+        }
+
+        lastNode = node;
+      }
+    }
+
+    prototype.opcode = function(type) {
+      var params = [].slice.call(arguments, 1);
+      this.opcodes.push({ type: type, params: params });
+    };
+
+    prototype.string = function(string) {
+      this.opcode('content', string);
+    };
+
+    prototype.element = function(element) {
+      this.opcode('openElement', element.tag);
+
+      element.attributes.forEach(function(attribute) {
+        this.attribute(attribute);
+      }, this);
+
+      processChildren(this, element.children);
+
+      this.opcode('closeElement');
+    };
+
+    prototype.attribute = function(attribute) {
+      var name = attribute[0],
+          value = attribute[1],
+          hasMustache = false;
+
+      if (value.length === 1 && typeof value[0] === 'string') {
+        this.opcode('setAttribute', name, value[0]);
+      }
+    };
+
+    prototype.ID = function(id) {
+      this.opcode('id', id.parts);
+    };
+
+    prototype.STRING = function(string) {
+      this.opcode('string', string.stringModeValue);
+    };
+
+    prototype.BOOLEAN = function(boolean) {
+      this.opcode('literal', boolean.stringModeValue);
+    };
+
+    prototype.INTEGER = function(integer) {
+      this.opcode('literal', integer.stringModeValue);
+    };
+
+    prototype.block = function(block) {
+      var compiler = new Fragment(),
+          program = compiler.compile(block.children, this.options),
+          inverse = compiler.compile(block.inverse, this.options);
+
+      this.children.push(program);
+      this.children.push(inverse);
+    };
+
+    __exports__.Fragment = Fragment;
+  });
+define("htmlbars/compiler/fragment2", 
+  ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/elements","htmlbars/compiler/stack","htmlbars/compiler/quoting","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __exports__) {
+    "use strict";
+    /*jshint evil:true*/
+
+    var processOpcodes = __dependency1__.processOpcodes;
+    var prepareHelper = __dependency2__.prepareHelper;
+    var call = __dependency3__.call;
+    var helper = __dependency3__.helper;
+    var pushElement = __dependency4__.pushElement;
+    var popElement = __dependency4__.popElement;
+    var topElement = __dependency4__.topElement;
+    var pushStack = __dependency5__.pushStack;
+    var popStack = __dependency5__.popStack;
+    var string = __dependency6__.string;
+    var quotedArray = __dependency6__.quotedArray;
+    var hash = __dependency6__.hash;
+
+    function Fragment2() {}
+
+    var compiler2 = Fragment2.prototype;
+
+    compiler2.compile = function(opcodeTree) {
+      this.output = [];
+      this.elementNumber = 0;
+
+      this.output.push("return function template() {");
+      this.preamble();
+      processOpcodes(this, opcodeTree.opcodes);
+      this.postamble();
+      this.output.push("};");
+
+      var childCompiler = new Fragment2();
+      return {
+        fn: new Function('dom', this.output.join("\n")),
+        children: opcodeTree.children.map(function (opcodes) {
+          return childCompiler.compile(opcodes);
+        })
+      };
+    };
+
+    compiler2.preamble = function() {
+      this.push("var element0, el");
+      this.push("var frag = element0 = dom.createDocumentFragment()");
+    };
+
+    compiler2.postamble = function() {
+      this.output.push("return frag;");
+    };
+
+    compiler2.program = function(programId, inverseId) {
+      pushStack(this.stack, inverseId);
+      pushStack(this.stack, programId);
+    };
+
+    compiler2.content = function(str) {
+      this.push(helper('appendText', this.el(), string(str)));
+    };
+
+    compiler2.push = function(string) {
+      this.output.push(string + ";");
+    };
+
+    compiler2.el = function() {
+      return topElement(this);
+    };
+
+    compiler2.openElement = function(tagName) {
+      var elRef = pushElement(this);
+      this.push("var " + elRef + " = el = " + call('dom.createElement', string(tagName)));
+    };
+
+    compiler2.setAttribute = function(name, value) {
+      this.push(call('dom.setAttribute', 'el', string(name), string(value)));
+    };
+
+    compiler2.closeElement = function() {
+      var elRef = popElement(this);
+      this.push(call([this.el(), 'appendChild'], elRef));
+    };
+
+    __exports__.Fragment2 = Fragment2;
+  });
 define("htmlbars/compiler/helpers", 
   ["htmlbars/compiler/quoting","htmlbars/compiler/stack","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
@@ -245,11 +448,13 @@ define("htmlbars/compiler/helpers",
       var options = ['types:' + array(types), 'hashTypes:' + hash(hashTypes), 'hash:' + hash(hashPairs)];
 
       if (programId !== null) {
-        options.push('render:child' + programId + '(dom)');
+        options.push('render:childTemplates[' + programId + ']');
       }
 
-      if (inverseId !== null) {
-        options.push('inverse:child' + inverseId + '(dom)');
+      // TODO ensure inverseId always initialized
+      // and remove undefined check
+      if (inverseId !== null && inverseId !== undefined) {
+        options.push('inverse:childTemplates[' + inverseId + ']');
       }
 
       return {
@@ -260,7 +465,470 @@ define("htmlbars/compiler/helpers",
 
     __exports__.prepareHelper = prepareHelper;
   });
+define("htmlbars/compiler/hydration", 
+  ["htmlbars/utils","htmlbars/ast","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
+    "use strict";
+    var merge = __dependency1__.merge;
+    var HTMLElement = __dependency2__.HTMLElement;
+    var BlockElement = __dependency2__.BlockElement;
 
+    function HydrationCompiler(options) {
+      this.options = options || {};
+
+      var knownHelpers = {
+        'helperMissing': true,
+        'blockHelperMissing': true,
+        'each': true,
+        'if': true,
+        'unless': true,
+        'with': true,
+        'log': true
+      };
+
+      this.options.knownHelpers = this.options.knownHelpers || {};
+      merge(knownHelpers, this.options.knownHelpers);
+    }
+
+    var compiler1 = HydrationCompiler.prototype;
+
+    compiler1.compile = function(ast) {
+      this.opcodes = [];
+      this.paths = [];
+      this.children = [];
+      processChildren(this, ast);
+      return {
+        opcodes: this.opcodes,
+        children: this.children
+      };
+    };
+
+    function processChildren(compiler, children) {
+      var node, lastNode, currentDOMChildIndex = -1;
+
+      for (var i=0, l=children.length; i<l; i++) {
+        node = children[i];
+
+        if (typeof node === 'string') {
+          ++currentDOMChildIndex;
+          // compiler.string(node);
+        } else if (node instanceof HTMLElement) {
+          compiler.paths.push(++currentDOMChildIndex);
+          compiler.element(node, i, l, currentDOMChildIndex);
+          compiler.paths.pop();
+        } else if (node instanceof BlockElement) {
+          compiler.block(node, i, l, currentDOMChildIndex);
+        } else {
+          compiler[node.type](node, i, l, currentDOMChildIndex);
+        }
+
+        lastNode = node;
+      }
+    }
+
+    compiler1.block = function(block, childIndex, childrenLength, currentDOMChildIndex) {
+      var compiler = new HydrationCompiler();
+
+      var program = compiler.compile(block.children, this.options),
+          inverse = compiler.compile(block.inverse, this.options),
+          mustache = block.helper;
+
+
+      var start = (currentDOMChildIndex < 0 ? null : currentDOMChildIndex),
+          end = (childIndex === childrenLength - 1 ? null : currentDOMChildIndex + 1);
+
+      this.children.push(program);
+      var programId = this.children.length - 1;
+
+      this.children.push(inverse);
+      var inverseId = this.children.length - 1;
+
+      this.opcode('program', programId, inverseId);
+      processParams(this, mustache.params);
+      processHash(this, mustache.hash);
+      this.opcode('helper', mustache.id.string, mustache.params.length, mustache.escaped, this.paths.slice(), start, end);
+    };
+
+    compiler1.opcode = function(type) {
+      var params = [].slice.call(arguments, 1);
+      this.opcodes.push({ type: type, params: params });
+    };
+
+    compiler1.string = function(string) {
+      this.opcode('content', string);
+    };
+
+    compiler1.element = function(element, childIndex, childrenLength, currentDOMChildIndex) {
+      // this.opcode('openElement', element.tag);
+
+      element.attributes.forEach(function(attribute) {
+        this.attribute(attribute);
+      }, this);
+
+      element.helpers.forEach(function(helper) {
+        this.nodeHelper(helper);
+      }, this);
+
+      processChildren(this, element.children);
+
+      // this.opcode('closeElement');
+    };
+
+    compiler1.attribute = function(attribute) {
+      var name = attribute[0],
+          value = attribute[1],
+          hasMustache = false;
+
+      // TODO: improve this
+      value.forEach(function(node) {
+        if (typeof node !== 'string') {
+          hasMustache = true;
+        }
+      });
+
+      if (hasMustache) {
+        value.forEach(function(node) {
+          if (typeof node === 'string') {
+            this.string(node);
+          } else {
+            this[node.type + 'InAttr'](node);
+          }
+        }, this);
+
+        this.opcode('attribute', name, value.length, this.paths.slice());
+      }
+    };
+
+    compiler1.nodeHelper = function(mustache) {
+      this.opcode('program', null);
+      processParams(this, mustache.params);
+      processHash(this, mustache.hash);
+
+      this.opcode('nodeHelper', mustache.id.string, mustache.params.length, this.paths.slice());
+    };
+
+    compiler1.mustache = function(mustache, childIndex, childrenLength, currentDOMChildIndex) {
+      var type = classifyMustache(mustache, this.options);
+
+      var start = (currentDOMChildIndex < 0 ? null : currentDOMChildIndex),
+          end = (childIndex === childrenLength - 1 ? null : currentDOMChildIndex + 1);
+
+      if (type === 'simple' || type === 'ambiguous') {
+        this.opcode('ambiguous', mustache.id.string, mustache.escaped, this.paths.slice(), start, end);
+      } else {
+        this.opcode('program', null);
+        processParams(this, mustache.params);
+        processHash(this, mustache.hash);
+        this.opcode('helper', mustache.id.string, mustache.params.length, mustache.escaped, this.paths.slice(), start, end);
+      }
+
+      // appendMustache(this, mustache);
+    };
+
+    compiler1.mustacheInAttr = function(mustache) {
+      var type = classifyMustache(mustache, this.options);
+
+      if (type === 'simple' || type === 'ambiguous') {
+        this.opcode('ambiguousAttr', mustache.id.string, mustache.escaped);
+      } else {
+        this.opcode('program', null);
+        processParams(this, mustache.params);
+        processHash(this, mustache.hash);
+        this.opcode('helperAttr', mustache.id.string, mustache.params.length, mustache.escaped);
+      }
+
+      // appendMustache(this, mustache);
+    };
+
+    compiler1.ID = function(id) {
+      this.opcode('id', id.parts);
+    };
+
+    compiler1.STRING = function(string) {
+      this.opcode('string', string.stringModeValue);
+    };
+
+    compiler1.BOOLEAN = function(boolean) {
+      this.opcode('literal', boolean.stringModeValue);
+    };
+
+    compiler1.INTEGER = function(integer) {
+      this.opcode('literal', integer.stringModeValue);
+    };
+
+    function classifyMustache(mustache, options) {
+      var isHelper   = mustache.isHelper;
+      var isEligible = mustache.eligibleHelper;
+
+      // if ambiguous, we can possibly resolve the ambiguity now
+      if (isEligible && !isHelper) {
+        var name = mustache.id.parts[0];
+
+        if (options.knownHelpers[name]) {
+          isHelper = true;
+        } else if (options.knownHelpersOnly) {
+          isEligible = false;
+        }
+      }
+
+      if (isHelper) { return "helper"; }
+      else if (isEligible) { return "ambiguous"; }
+      else { return "simple"; }
+    }
+
+    function processParams(compiler, params) {
+      params.forEach(function(param) {
+        compiler[param.type](param);
+      });
+    }
+
+    function processHash(compiler, hash) {
+      if (hash) {
+        hash.pairs.forEach(function(pair) {
+          var name = pair[0], param = pair[1];
+          compiler[param.type](param);
+          compiler.opcode('stackLiteral', name);
+        });
+        compiler.opcode('stackLiteral', hash.pairs.length);
+      } else {
+        compiler.opcode('stackLiteral', 0);
+      }
+    }
+
+    function appendMustache(compiler, mustache) {
+      if (mustache.escaped) {
+        compiler.opcode('appendText');
+      } else {
+        compiler.opcode('appendHTML');
+      }
+    }
+
+    __exports__.HydrationCompiler = HydrationCompiler;
+  });
+define("htmlbars/compiler/hydration2", 
+  ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/stack","htmlbars/compiler/quoting","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
+    "use strict";
+    /*jshint evil:true*/
+
+    var processOpcodes = __dependency1__.processOpcodes;
+    var prepareHelper = __dependency2__.prepareHelper;
+    var call = __dependency3__.call;
+    var helper = __dependency3__.helper;
+    var pushStack = __dependency4__.pushStack;
+    var popStack = __dependency4__.popStack;
+    var string = __dependency5__.string;
+    var quotedArray = __dependency5__.quotedArray;
+    var hash = __dependency5__.hash;
+    var array = __dependency5__.array;
+
+    function Hydration2() {}
+
+    var prototype = Hydration2.prototype;
+
+    prototype.compile = function(opcodeTree) {
+      this.output = [];
+      this.stack = [];
+
+      this.output.push("return function hydrate(fragment, childTemplates) {");
+
+      this.mustaches = [];
+
+      processOpcodes(this, opcodeTree.opcodes);
+
+      this.output.push("return [\n"+this.mustaches.join(",\n")+"\n];");
+      this.output.push("};");
+
+      var childCompiler = new Hydration2();
+
+      return {
+        fn: new Function("Range", this.output.join("\n")),
+        children: opcodeTree.children.map(function (opcodes) {
+          return childCompiler.compile(opcodes);
+        })
+      };
+    };
+
+    prototype.push = function(string) {
+      this.output.push(string + ";");
+    };
+
+    prototype.program = function(programId, inverseId) {
+      this.stack.push(inverseId);
+      this.stack.push(programId);
+    };
+
+    prototype.id = function(parts) {
+      pushStack(this.stack, string('id'));
+      pushStack(this.stack, string(parts.join('.')));
+    };
+
+    prototype.literal = function(literal) {
+      pushStack(this.stack, string(typeof literal));
+      pushStack(this.stack, literal);
+    };
+
+    prototype.stackLiteral = function(literal) {
+      pushStack(this.stack, literal);
+    };
+
+    prototype.string = function(str) {
+      pushStack(this.stack, string('string'));
+      pushStack(this.stack, string(str));
+    };
+
+    prototype.content = function(str) {
+      pushStack(this.stack, string(str));
+    };
+
+    prototype.helper = function(name, size, escaped, parentPath, startIndex, endIndex) {
+      var prepared = prepareHelper(this.stack, size);
+      prepared.options.push('escaped:'+escaped);
+      this.pushMustacheRange(string(name), prepared.args, prepared.options, parentPath, startIndex, endIndex);
+    };
+
+    prototype.ambiguous = function(str, escaped, parentPath, startIndex, endIndex) {
+      this.pushMustacheRange(string(str), '[]', ['escaped:'+escaped], parentPath, startIndex, endIndex);
+    };
+
+    prototype.ambiguousAttr = function(str, escaped) {
+      pushStack(this.stack, '['+string(str)+', [], {escaped:'+escaped+'}]');
+    };
+
+    prototype.helperAttr = function(name, size, escaped, elementPath) {
+      var prepared = prepareHelper(this.stack, size);
+      prepared.options.push('escaped:'+escaped);
+
+      pushStack(this.stack, '['+string(name)+','+prepared.args+','+ hash(prepared.options)+']');
+    };
+
+    prototype.attribute = function(name, size, elementPath) {
+      var args = [];
+      for (var i = 0; i < size; i++) {
+        args.unshift(popStack(this.stack));
+      }
+
+      var element = "fragment";
+      for (i=0; i<elementPath.length; i++) {
+        element += ".childNodes["+elementPath[i]+"]";
+      }
+      var pairs = ['element:'+element, 'name:'+string(name)];
+      this.mustaches.push('["ATTRIBUTE", ['+ args +'],'+hash(pairs)+']');
+    };
+
+    prototype.nodeHelper = function(name, size, elementPath) {
+      var prepared = prepareHelper(this.stack, size);
+      this.pushMustacheInNode(string(name), prepared.args, prepared.options, elementPath);
+    };
+
+    prototype.pushMustacheRange = function(name, args, pairs, parentPath, startIndex, endIndex) {
+      var parent = "fragment";
+      for (var i=0; i<parentPath.length; i++) {
+        parent += ".childNodes["+parentPath[i]+"]";
+      }
+      var range = "Range.create("+parent+","+
+        (startIndex === null ? "null" : startIndex)+","+
+        (endIndex === null ? "null" : endIndex)+")";
+
+      pairs.push('range:'+range);
+
+      this.mustaches.push('['+name+','+args+','+hash(pairs)+']');
+    };
+
+    prototype.pushMustacheInNode = function(name, args, pairs, elementPath) {
+      var element = "fragment";
+      for (var i=0; i<elementPath.length; i++) {
+        element += ".childNodes["+elementPath[i]+"]";
+      }
+      pairs.push('element:'+element);
+      this.mustaches.push('['+name+','+args+','+hash(pairs)+']');
+    };
+
+    __exports__.Hydration2 = Hydration2;
+  });
+define("htmlbars/compiler/hydration_attr", 
+  ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/stack","htmlbars/compiler/quoting","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
+    "use strict";
+    var processOpcodes = __dependency1__.processOpcodes;
+    var prepareHelper = __dependency2__.prepareHelper;
+    var helper = __dependency3__.helper;
+    var popStack = __dependency4__.popStack;
+    var pushStack = __dependency4__.pushStack;
+    var string = __dependency5__.string;
+    var hash = __dependency5__.hash;
+    var quotedArray = __dependency5__.quotedArray;
+
+    function HydrationAttrCompiler() {}
+
+    var attrCompiler = HydrationAttrCompiler.prototype;
+
+    attrCompiler.compile = function(opcodes, options) {
+      this.output = [];
+      this.stackNumber = 0;
+      this.stack = [];
+
+      // this.preamble();
+      processOpcodes(this, opcodes);
+      // this.postamble();
+
+      /*jshint evil:true*/
+      return opcodes;
+    };
+
+    attrCompiler.content = function(str) {
+      pushStack(this.stack, string('string'));
+      pushStack(this.stack, string(str));
+    };
+
+    attrCompiler.ambiguous = function(str, escaped) {
+      pushStack(this.stack, string('string'));
+      pushStack(this.stack, string(str));
+
+      // this.push(helper('ambiguousAttr', 'context', quotedArray([string]), 'buffer', 'options'));
+    };
+
+    attrCompiler.helper = function(name, size, escaped) {
+      var prepared = prepareHelper(this.stack, size);
+      prepared.options.push('setAttribute:options.setAttribute');
+
+      this.push(helper('helperAttr', 'context', string(name), prepared.args, 'buffer', hash(prepared.options)));
+    };
+
+    attrCompiler.appendText = function() {
+      // noop
+    };
+
+    attrCompiler.program = function() {
+      pushStack(this.stack, null);
+      pushStack(this.stack, null);
+    };
+
+    attrCompiler.id = function(parts) {
+      pushStack(this.stack, string('id'));
+      pushStack(this.stack, string(parts[0]));
+    };
+
+    attrCompiler.literal = function(literal) {
+      pushStack(this.stack, string(typeof literal));
+      pushStack(this.stack, literal);
+    };
+
+    attrCompiler.string = function(str) {
+      pushStack(this.stack, string('string'));
+      pushStack(this.stack, string(str));
+    };
+
+    attrCompiler.stackLiteral = function(literal) {
+      pushStack(this.stack, literal);
+    };
+
+    attrCompiler.push = function(string) {
+      this.output.push(string + ";");
+    };
+
+    __exports__.HydrationAttrCompiler = HydrationAttrCompiler;
+  });
 define("htmlbars/compiler/invoke", 
   ["exports"],
   function(__exports__) {
@@ -283,26 +951,25 @@ define("htmlbars/compiler/invoke",
     }
     __exports__.helper = helper;
   });
-
 define("htmlbars/compiler/pass1", 
-  ["htmlbars/utils","htmlbars/ast","htmlbars/compiler/attr","htmlbars/compiler/utils","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
+  ["htmlbars/utils","htmlbars/ast","htmlbars/compiler/attr","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
     var merge = __dependency1__.merge;
     var HTMLElement = __dependency2__.HTMLElement;
     var BlockElement = __dependency2__.BlockElement;
     var AttrCompiler = __dependency3__.AttrCompiler;
-    var compileAST = __dependency4__.compileAST;
 
     function compileAttr(ast, options) {
       var compiler1 = new Compiler1(options),
           attrCompiler = new AttrCompiler(options);
 
       var opcodes = compiler1.compile(ast);
-      return attrCompiler.compile(opcodes)
+      return attrCompiler.compile(opcodes);
     }
 
-    function Compiler1(options) {
+    function Compiler1(compileAST, options) {
+      this.compileAST = compileAST;
       this.options = options || {};
 
       var knownHelpers = {
@@ -317,38 +984,49 @@ define("htmlbars/compiler/pass1",
 
       this.options.knownHelpers = this.options.knownHelpers || {};
       merge(knownHelpers, this.options.knownHelpers);
-    };
+    }
 
     var compiler1 = Compiler1.prototype;
 
     compiler1.compile = function(ast) {
       this.opcodes = [];
+      this.opcodes2 = [];
+      this.paths = [];
       this.children = [];
       processChildren(this, ast);
       return this.opcodes;
     };
 
     function processChildren(compiler, children) {
-      var node;
+      var node, lastNode, currentDOMChildIndex = -1;
 
       for (var i=0, l=children.length; i<l; i++) {
         node = children[i];
 
         if (typeof node === 'string') {
+          ++currentDOMChildIndex;
           compiler.string(node);
         } else if (node instanceof HTMLElement) {
+          compiler.paths.push(++currentDOMChildIndex);
           compiler.element(node);
+          compiler.paths.pop();
         } else if (node instanceof BlockElement) {
           compiler.block(node);
         } else {
-          compiler[node.type](node);
+          if (lastNode && lastNode.type === node.type) {
+            ++currentDOMChildIndex;
+            compiler.string();
+          }
+          compiler[node.type](node, i, l, currentDOMChildIndex);
         }
+
+        lastNode = node;
       }
     }
 
     compiler1.block = function(block) {
-      var program = compileAST(block.children, this.options),
-          inverse = compileAST(block.inverse, this.options),
+      var program = this.compileAST(block.children, this.options),
+          inverse = this.compileAST(block.inverse, this.options),
           mustache = block.helper;
 
       this.children.push(program);
@@ -367,6 +1045,11 @@ define("htmlbars/compiler/pass1",
     compiler1.opcode = function(type) {
       var params = [].slice.call(arguments, 1);
       this.opcodes.push({ type: type, params: params });
+    };
+
+    compiler1.opcode2 = function() {
+      var params = [].slice.call(arguments);
+      this.opcodes2.push(params);
     };
 
     compiler1.string = function(string) {
@@ -407,7 +1090,7 @@ define("htmlbars/compiler/pass1",
       this.opcode('nodeHelper', mustache.id.string, mustache.params.length);
     };
 
-    compiler1.mustache = function(mustache) {
+    compiler1.mustache = function(mustache, childIndex, childrenLength, currentDOMChildIndex) {
       var type = classifyMustache(mustache, this.options);
 
       if (type === 'simple') {
@@ -420,6 +1103,10 @@ define("htmlbars/compiler/pass1",
         processHash(this, mustache.hash);
         this.opcode('helper', mustache.id.string, mustache.params.length, mustache.escaped);
       }
+
+      var start = (currentDOMChildIndex < 0 ? null : currentDOMChildIndex),
+          end = (childIndex === childrenLength - 1 ? null : currentDOMChildIndex + 1);
+      this.opcode2(mustache.id.string, this.paths.slice(), start, end);
 
       appendMustache(this, mustache);
     };
@@ -438,7 +1125,7 @@ define("htmlbars/compiler/pass1",
 
     compiler1.INTEGER = function(integer) {
       this.opcode('literal', integer.stringModeValue);
-    }
+    };
 
     function classifyMustache(mustache, options) {
       var isHelper   = mustache.isHelper;
@@ -489,7 +1176,6 @@ define("htmlbars/compiler/pass1",
 
     __exports__.Compiler1 = Compiler1;
   });
-
 define("htmlbars/compiler/pass2", 
   ["htmlbars/compiler/utils","htmlbars/compiler/helpers","htmlbars/compiler/invoke","htmlbars/compiler/elements","htmlbars/compiler/stack","htmlbars/compiler/quoting","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __exports__) {
@@ -551,7 +1237,7 @@ define("htmlbars/compiler/pass2",
     };
 
     compiler2.content = function(str) {
-      this.push(call([this.el(), 'appendChild'], helper('frag', this.el(), string(str))));
+      this.push(helper('appendText', this.el(), string(str)));
     };
 
     compiler2.push = function(string) {
@@ -632,7 +1318,6 @@ define("htmlbars/compiler/pass2",
 
     __exports__.Compiler2 = Compiler2;
   });
-
 define("htmlbars/compiler/quoting", 
   ["exports"],
   function(__exports__) {
@@ -649,8 +1334,8 @@ define("htmlbars/compiler/quoting",
 
     __exports__.string = string;
 
-    function array(array) {
-      return "[" + array + "]";
+    function array(a) {
+      return "[" + a + "]";
     }
 
     __exports__.array = array;
@@ -662,9 +1347,9 @@ define("htmlbars/compiler/quoting",
     __exports__.quotedArray = quotedArray;function hash(pairs) {
       return "{" + pairs.join(",") + "}";
     }
+
     __exports__.hash = hash;
   });
-
 define("htmlbars/compiler/stack", 
   ["exports"],
   function(__exports__) {
@@ -673,16 +1358,110 @@ define("htmlbars/compiler/stack",
     // stack implementation involving temporary variables
 
     function pushStack(stack, literal) {
-      stack.push({ literal: true, value: literal });
+      stack.push(literal);
     }
 
     __exports__.pushStack = pushStack;function popStack(stack) {
-      var poppedValue = stack.pop();
-      return poppedValue.value;
+      return stack.pop();
     }
+
     __exports__.popStack = popStack;
   });
+define("htmlbars/compiler/template", 
+  ["htmlbars/compiler/fragment","htmlbars/compiler/hydration","htmlbars/compiler/hydration2","htmlbars/compiler/fragment2","htmlbars/parser","htmlbars/runtime","htmlbars/runtime/range","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __exports__) {
+    "use strict";
+    var Fragment = __dependency1__.Fragment;
+    var HydrationCompiler = __dependency2__.HydrationCompiler;
+    var Hydration2 = __dependency3__.Hydration2;
+    var Fragment2 = __dependency4__.Fragment2;
+    var preprocess = __dependency5__.preprocess;
+    var domHelpers = __dependency6__.domHelpers;
+    var Range = __dependency7__.Range;
 
+    function compileAST(ast, options) {
+      var fragmentCompiler = new Fragment(options),
+          hydrationCompiler = new HydrationCompiler(compileAST, options),
+          fragment2 = new Fragment2(),
+          hydration2 = new Hydration2();
+
+      var fragmentOpcodeTree = fragmentCompiler.compile(ast);
+      var hydrationOpcodeTree = hydrationCompiler.compile(ast);
+
+      var dom = domHelpers({});
+      function closeOverDOM(tree) {
+        var children = tree.children;
+        tree.fn = tree.fn(dom);
+        for (var i=0; i<children.length; i++) {
+          closeOverDOM(children[i]);
+        }
+      }
+
+      var fragmentFnTree = fragment2.compile(fragmentOpcodeTree);
+      closeOverDOM(fragmentFnTree);
+
+      function closeOverRange(tree) {
+        var children = tree.children;
+        tree.fn = tree.fn(Range);
+        for (var i=0; i<children.length; i++) {
+          closeOverRange(children[i]);
+        }
+      }
+      var hydrationFnTree = hydration2.compile(hydrationOpcodeTree);
+      closeOverRange(hydrationFnTree);
+
+      function buildTemplate(fragmentFnTree, hydrationFnTree) {
+        var childTemplates = [];
+        for (var i=0, l=fragmentFnTree.children.length; i<l; i++) {
+          childTemplates.push(buildTemplate(fragmentFnTree.children[i], hydrationFnTree.children[i]));
+        }
+
+        var cachedFragment;
+        return function templateFunction(context, options) {
+          if (!cachedFragment) {
+            cachedFragment = fragmentFnTree.fn(context, options);
+          }
+
+          var clone = cachedFragment.cloneNode(true);
+          var mustacheInfos = hydrationFnTree.fn(clone, childTemplates);
+          var helpers = options && options.helpers || {};
+
+          var mustacheInfo;
+          for (var i = 0, l = mustacheInfos.length; i < l; i++) {
+            mustacheInfo = mustacheInfos[i];
+            var name = mustacheInfo[0],
+                params = mustacheInfo[1],
+                helperOptions = mustacheInfo[2];
+            helperOptions.helpers = helpers;
+            if (!helperOptions.element) { helperOptions.element = helperOptions.range; }
+
+            if (name === 'ATTRIBUTE') {
+              helpers.ATTRIBUTE(context, helperOptions.name, params, helperOptions);
+            } else {
+              helpers.RESOLVE(context, name, params, helperOptions);
+            }
+          }
+
+          return clone;
+        };
+      }
+
+      return buildTemplate(fragmentFnTree, hydrationFnTree);
+    }
+
+    function TemplateCompiler(options) {
+
+    }
+
+    TemplateCompiler.prototype = {
+      compile: function(html, options) {
+        var ast = preprocess(html, options);
+        return compileAST(ast);
+      }
+    };
+
+    __exports__.TemplateCompiler = TemplateCompiler;
+  });
 define("htmlbars/compiler/utils", 
   ["exports"],
   function(__exports__) {
@@ -697,23 +1476,8 @@ define("htmlbars/compiler/utils",
       return "dom.stream(function(stream) { return " + string + " })";
     }
 
-    __exports__.stream = stream;function compileAST(ast, options) {
-      // circular dependency hack
-      var Compiler1 = requireModule('htmlbars/compiler/pass1').Compiler1;
-      var Compiler2 = requireModule('htmlbars/compiler/pass2').Compiler2;
-
-      var compiler1 = new Compiler1(options),
-          compiler2 = new Compiler2(options);
-
-      var opcodes = compiler1.compile(ast);
-      return compiler2.compile(opcodes, {
-        children: compiler1.children
-      });
-    }
-
-    __exports__.compileAST = compileAST;
+    __exports__.stream = stream;
   });
-
 define("htmlbars/helpers", 
   ["exports"],
   function(__exports__) {
@@ -730,7 +1494,6 @@ define("htmlbars/helpers",
 
     __exports__.removeHelper = removeHelper;__exports__.helpers = helpers;
   });
-
 define("htmlbars/html-parser/process-token", 
   ["htmlbars/ast","simple-html-tokenizer","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
@@ -764,7 +1527,7 @@ define("htmlbars/html-parser/process-token",
       "attributeValueSingleQuoted": "attr",
       "attributeValueUnquoted": "attr",
       "beforeAttributeName": "in-tag"
-    }
+    };
 
     var voidTagNames = "area base br col command embed hr img input keygen link meta param source track wbr";
     var voidMap = {};
@@ -827,7 +1590,6 @@ define("htmlbars/html-parser/process-token",
 
     __exports__.config = config;
   });
-
 define("htmlbars/macros", 
   ["htmlbars/html-parser/process-token","htmlbars/ast","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
@@ -872,7 +1634,6 @@ define("htmlbars/macros",
     // configure the HTML Parser
     config.processHTMLMacros = processHTMLMacros;
   });
-
 define("htmlbars/parser", 
   ["simple-html-tokenizer","htmlbars/ast","htmlbars/html-parser/process-token","handlebars","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
@@ -884,7 +1645,7 @@ define("htmlbars/parser",
     var HTMLElement = __dependency2__.HTMLElement;
     var BlockElement = __dependency2__.BlockElement;
     var processToken = __dependency3__.processToken;
-    var Handlebars = __dependency4__['default'];
+    var Handlebars = __dependency4__["default"];
 
     function Visitor() {}
 
@@ -945,7 +1706,20 @@ define("htmlbars/parser",
 
       blockNode.inverse = inverse.children;
 
-      currentElement(this).children.push(blockNode);
+      var el = currentElement(this),
+          len = el.children.length,
+          lastNode;
+
+      if (len > 0) {
+        lastNode = el.children[len - 1];
+      }
+
+      // Back to back BlockElements need an empty text node delimiter
+      if (lastNode && blockNode instanceof BlockElement && lastNode instanceof BlockElement) {
+        el.children.push('');
+      }
+
+      el.children.push(blockNode);
     };
 
     processor.content = function(content) {
@@ -998,7 +1772,6 @@ define("htmlbars/parser",
       helpers.push(helper);
     };
   });
-
 define("htmlbars/runtime", 
   ["htmlbars/utils","exports"],
   function(__dependency1__, __exports__) {
@@ -1051,7 +1824,7 @@ define("htmlbars/runtime",
               dom: this
             };
 
-            return helper.apply(context, [parts, options]);
+            return helper(context, parts, options);
           }
 
           return parts.reduce(function(current, part) {
@@ -1144,8 +1917,7 @@ define("htmlbars/runtime",
         },
 
         frag: function(element, string) {
-          /*global DocumentFragment*/
-          if (element instanceof DocumentFragment) {
+          if (element.nodeType === 11) {
             element = this.createElement('div');
           }
 
@@ -1190,7 +1962,133 @@ define("htmlbars/runtime",
 
     __exports__.hydrate = hydrate;
   });
+define("htmlbars/runtime/helpers", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    function RESOLVE(context, path, params, options) {
+      var helper = options.helpers[path];
+      if (helper) {
+        var ret = helper(context, params, options);
+        if (ret) {
+          options.range.appendText(ret);
+        }
+      } else {
+        if (path === 'testing') { debugger; }
+        var value = context[path];
 
+        options.range.clear();
+        if (options.escaped) {
+          options.range.appendText(value);
+        } else {
+          options.range.appendHTML(value);
+        }
+      }
+    }
+
+    __exports__.RESOLVE = RESOLVE;function RESOLVE_IN_ATTR(context, path, params, options) {
+      var helpers = options.helpers,
+          helper = helpers[path];
+
+      if (helper) {
+        return helper(context, params, options);
+      } else {
+        return context[path];
+      }
+    }
+
+    __exports__.RESOLVE_IN_ATTR = RESOLVE_IN_ATTR;function ATTRIBUTE(context, name, params, options) {
+
+      var helpers = options.helpers,
+          buffer = [];
+
+      params.forEach(function(node) {
+        if (typeof node === 'string') {
+          buffer.push(node);
+        } else {
+          var helperOptions = node[2];
+          helperOptions.helpers = helpers;
+          var ret = helpers.RESOLVE_IN_ATTR(context, node[0], node[1], helperOptions);
+          if (ret) { buffer.push(ret); }
+        }
+      });
+
+      if (buffer.length) {
+        options.element.setAttribute(name, buffer.join(''));
+      }
+    }
+    __exports__.ATTRIBUTE = ATTRIBUTE;
+  });
+define("htmlbars/runtime/range", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    function Range(parent, start, end) {
+      this.parent = parent;
+      this.start = start;
+      this.end = end;
+    }
+
+    __exports__.Range = Range;Range.create = function (parent, startIndex, endIndex) {
+      var start = startIndex === null ? null : parent.childNodes[startIndex],
+          end = endIndex === null ? null : parent.childNodes[endIndex];
+      return new Range(parent, start, end);
+    };
+
+    Range.prototype = {
+      clear: function() {
+        var parent = this.parent,
+            start = this.start,
+            end = this.end,
+            current, previous;
+
+        if (end === null) {
+          current = parent.lastChild;
+        } else {
+          current = end.previousSibling;
+        }
+
+        while (current !== null && current !== start) {
+          previous = current.previousSibling;
+          parent.removeChild(current);
+          current = previous;
+        }
+      },
+      replace: function(node) {
+        this.clear();
+        this.appendChild(node);
+      },
+      appendChild: function(node) {
+        this.parent.insertBefore(node, this.end);
+      },
+      appendChildren: function(nodeList) {
+        var parent = this.parent,
+            ref = this.end,
+            i = nodeList.length,
+            node;
+        while (i--) {
+          node = nodeList[i];
+          parent.insertBefore(node, ref);
+          ref = node;
+        }
+      },
+      appendText: function (str) {
+        this.appendChild(this.parent.ownerDocument.createTextNode(str));
+      },
+      appendHTML: function (html) {
+        var parent = this.parent, element;
+        if (parent.nodeType === 11) {
+          /* TODO require templates always have a contextual element
+             instead of element0 = frag */
+          element = parent.ownerDocument.createElement('div');
+        } else {
+          element = parent.cloneNode(false);
+        }
+        element.innerHTML = html;
+        this.appendChildren(element.childNodes);
+      }
+    };
+  });
 define("htmlbars/utils", 
   ["exports"],
   function(__exports__) {
@@ -1205,44 +2103,6 @@ define("htmlbars/utils",
 
     __exports__.merge = merge;
   });
-
-define("loader", 
-  [],
-  function() {
-    "use strict";
-    var define, require;
-
-    (function() {
-      var registry = {}, seen = {};
-
-      define = function(name, deps, callback) {
-        registry[name] = { deps: deps, callback: callback };
-      };
-
-      require = function require(name) {
-        if (seen[name]) { return seen[name]; }
-        seen[name] = {};
-
-        var mod = registry[name],
-            deps = mod.deps,
-            callback = mod.callback,
-            reified = [],
-            exports;
-
-        for (var i=0, l=deps.length; i<l; i++) {
-          if (deps[i] === 'exports') {
-            reified.push(exports = {});
-          } else {
-            reified.push(require(deps[i]));
-          }
-        }
-
-        var value = callback.apply(this, reified);
-        return seen[name] = exports || value;
-      };
-    })();
-  });
-
 define("simple-html-tokenizer", 
   ["exports"],
   function(__exports__) {
@@ -1729,3 +2589,5 @@ define("simple-html-tokenizer",
     __exports__.Chars = Chars;
     __exports__.CommentToken = CommentToken;
   });
+//
+//# sourceMappingURL=htmlbars-0.1.0.amd.js.map
