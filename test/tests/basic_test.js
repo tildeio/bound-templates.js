@@ -20,22 +20,7 @@ test("Basic curlies insert the contents of the curlies", function() {
 
   equalHTML(template({ hello: "hello world" }), "<p>hello world</p>");
 });
-/*
-test("Curlies are data-bound using the specified wrapper", function() {
-  function TestHTMLElement(name) {
-    HTMLElement.call(this, name);
-    this.node.setAttribute('data-test-success', true);
-  }
 
-  TestHTMLElement.prototype = Object.create(HTMLElement.prototype);
-
-  var template = compile("<p>{{hello}}</p>");
-  var model = { hello: "hello world" },
-      fragment = template(model);
-
-  equalHTML(fragment, "<p data-test-success=\"true\">hello world</p>");
-});
-*/
 test("Curlies can be updated when the model changes", function() {
   var template = compile("<p>{{hello}}</p>");
 
@@ -49,7 +34,7 @@ test("Curlies can be updated when the model changes", function() {
 
   equalHTML(fragment, "<p>goodbye cruel world</p>");
 });
-/*
+
 test("Attribute runs can be updated when the model changes", function() {
   var template = compile('<a href="http://{{host}}/{{path}}">hello</a>');
 
@@ -69,11 +54,11 @@ test("Attribute runs can be updated when the model changes", function() {
 test("Attribute helpers are can return streams", function() {
   var template = compile('<a href="{{link-to \'post\' id}}">post</a>', {
     helpers: {
-      "link-to": function(path, model, options) {
-        equal(options.types[0], 'string', "Types should be passed along");
-        equal(options.types[1], 'id', "Types should be passed along");
+      "link-to": function(params, objects) {
+        equal(params[0], 'post');
+        ok(params[1] instanceof PathObserver);
 
-        return map(new PathObserver(this, model), function(value) {
+        return map(params[1], function(value) {
           return "/posts/" + value;
         });
       }
@@ -94,16 +79,13 @@ test("Attribute helpers are can return streams", function() {
 test("Attribute helpers can merge path streams", function() {
   var template = compile('<a href="{{link-to host=host path=path}}">post</a>', {
     helpers: {
-      "link-to": function(options) {
-        equal(options.hashTypes.host, "id");
-        equal(options.hashTypes.path, "id");
-
+      "link-to": function(params, options) {
         var hash = options.hash;
 
-        var hostStream = new PathObserver(this, hash.host),
-            pathStream = new PathObserver(this, hash.path);
+        ok(hash.host instanceof PathObserver);
+        ok(hash.path instanceof PathObserver);
 
-        return zipLatest(hostStream, pathStream, function(host, path) {
+        return zipLatest(hash.host, hash.path, function(host, path) {
           return "http://" + host + "/" + path;
         });
       }
@@ -141,7 +123,6 @@ test("Attribute runs can be updated when the model path changes", function() {
 
   equalHTML(fragment, '<a href="http://www.example2.com/goodbye">hello</a>');
 });
-*/
 
 test("Helper arguments get properly converted to streams when appropriate", function() {
   expect(4);
