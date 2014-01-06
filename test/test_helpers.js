@@ -167,7 +167,6 @@ function RESOLVE_IN_ATTR(context, path, params, options) {
       helper = helpers[path];
 
   if (helper) {
-    debugger;
     streamifyArgs(context, params, options);
     return helper(params, options);
   } else {
