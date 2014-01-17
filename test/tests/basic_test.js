@@ -1,8 +1,9 @@
-import { module, test, equal } from "test_helpers";
+import { defaultOptions, module, test, equal, merge } from "test_helpers";
 import { equalHTML } from "test_helpers";
-import { compile, HTMLElement, PathObserver } from "test_helpers";
+import { compile, PathObserver, STREAM_FOR } from "test_helpers";
 import { notify } from "test_helpers";
 import { map, zipLatest } from "test_helpers";
+
 
 module("Basic test", {
   setup: function() {
@@ -18,14 +19,14 @@ test("Basic HTML becomes an HTML fragment", function() {
 test("Basic curlies insert the contents of the curlies", function() {
   var template = compile("<p>{{hello}}</p>");
 
-  equalHTML(template({ hello: "hello world" }), "<p>hello world</p>");
+  equalHTML(template({ hello: "hello world" }, defaultOptions), "<p>hello world</p>");
 });
 
 test("Curlies can be updated when the model changes", function() {
   var template = compile("<p>{{hello}}</p>");
 
   var model = { hello: "hello world" },
-      fragment = template(model);
+      fragment = template(model, defaultOptions);
 
   equalHTML(fragment, "<p>hello world</p>");
 
@@ -35,11 +36,27 @@ test("Curlies can be updated when the model changes", function() {
   equalHTML(fragment, "<p>goodbye cruel world</p>");
 });
 
+test("Curlies without a parent can be updated when the model changes", function() {
+  var template = compile("{{foo}}{{bar}}");
+
+  var model = { foo: "foo", bar: "bar" },
+      fragment = template(model, defaultOptions);
+
+  var fixtureEl = document.getElementById('qunit-fixture');
+  fixtureEl.appendChild(fragment);
+
+  equal(fixtureEl.innerHTML, "foobar");
+
+  model.foo = "foo still here";
+  notify(model, 'foo');
+
+  equal(fixtureEl.innerHTML, "foo still herebar");
+});
 test("Attribute runs can be updated when the model changes", function() {
   var template = compile('<a href="http://{{host}}/{{path}}">hello</a>');
 
   var model = { host: "example.com", path: "hello" },
-      fragment = template(model);
+      fragment = template(model, defaultOptions);
 
   equalHTML(fragment, '<a href="http://example.com/hello">hello</a>');
 
@@ -52,21 +69,20 @@ test("Attribute runs can be updated when the model changes", function() {
 });
 
 test("Attribute helpers are can return streams", function() {
-  var template = compile('<a href="{{link-to \'post\' id}}">post</a>', {
-    helpers: {
-      "link-to": function(params, objects) {
-        equal(params[0], 'post');
-        ok(params[1] instanceof PathObserver);
+  var template = compile('<a href="{{link-to \'post\' id}}">post</a>');
 
-        return map(params[1], function(value) {
-          return "/posts/" + value;
-        });
-      }
-    }
-  });
+  var options = merge({}, defaultOptions);
+  options.helpers["link-to"] = function(params, objects) {
+    equal(params[0], 'post');
+    ok(params[1] instanceof PathObserver);
+
+    return map(params[1], function(value) {
+      return "/posts/" + value;
+    });
+  };
 
   var model = { id: 1 },
-      fragment = template(model);
+      fragment = template(model, options);
 
   equalHTML(fragment, '<a href="/posts/1">post</a>');
 
@@ -77,23 +93,22 @@ test("Attribute helpers are can return streams", function() {
 });
 
 test("Attribute helpers can merge path streams", function() {
-  var template = compile('<a href="{{link-to host=host path=path}}">post</a>', {
-    helpers: {
-      "link-to": function(params, options) {
-        var hash = options.hash;
+  var template = compile('<a href="{{link-to host=host path=path}}">post</a>');
 
-        ok(hash.host instanceof PathObserver);
-        ok(hash.path instanceof PathObserver);
+  var options = merge({}, defaultOptions);
+  options.helpers["link-to"] = function(params, options) {
+    var hash = options.hash;
 
-        return zipLatest(hash.host, hash.path, function(host, path) {
-          return "http://" + host + "/" + path;
-        });
-      }
-    }
-  });
+    ok(hash.host instanceof PathObserver);
+    ok(hash.path instanceof PathObserver);
+
+    return zipLatest(hash.host, hash.path, function(host, path) {
+      return "http://" + host + "/" + path;
+    });
+  };
 
   var model = { host: "example.com", path: "hello" },
-      fragment = template(model);
+      fragment = template(model, options);
 
   equalHTML(fragment, '<a href="http://example.com/hello">post</a>');
 
@@ -112,7 +127,7 @@ test("Attribute runs can be updated when the model path changes", function() {
           host: { url: "example.com" },
           path: { name: "hello" }
       },
-      fragment = template(model);
+      fragment = template(model, defaultOptions);
 
   equalHTML(fragment, '<a href="http://example.com/hello">hello</a>');
 
@@ -127,15 +142,14 @@ test("Attribute runs can be updated when the model path changes", function() {
 test("Helper arguments get properly converted to streams when appropriate", function() {
   expect(4);
 
+  var options = merge({}, defaultOptions);
+  options.helpers.testing = function(params, options) {
+    equal(params[0], 'foo');
+    ok(params[1] instanceof PathObserver);
+    ok(options.hash.baz instanceof PathObserver);
+    equal(options.hash.seems, 'good');
+  };
+
   var template = compile('<div>{{testing "foo" bar baz=qux seems="good"}}</div>');
-  template({bar: "bar", qux: "qux"}, {
-    helpers: {
-      testing: function(params, options) {
-        equal(params[0], 'foo');
-        ok(params[1] instanceof PathObserver);
-        ok(options.hash.baz instanceof PathObserver);
-        equal(options.hash.seems, 'good');
-      }
-    }
-  });
+  template({bar: "bar", qux: "qux"}, options);
 });

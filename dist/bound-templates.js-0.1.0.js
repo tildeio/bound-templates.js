@@ -52,10 +52,21 @@ var define, requireModule;
 })();
 
 define("bound-templates", 
-  [],
-  function() {
+  ["htmlbars/compiler","bound-templates/stream","bound-templates/runtime","htmlbars/utils","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
+    var htmlbarsCompile = __dependency1__.compile;
+    var Stream = __dependency2__.Stream;
+    var RESOLVE = __dependency3__.RESOLVE;
+    var RESOLVE_IN_ATTR = __dependency3__.RESOLVE_IN_ATTR;
+    var ATTRIBUTE = __dependency3__.ATTRIBUTE;
+    var merge = __dependency4__.merge;
 
+    function compile(string, options) {
+      return htmlbarsCompile(string, options);
+    }
+
+    __exports__.compile = compile;__exports__.Stream = Stream;
   });
 
 define("bound-templates/compiler", 
@@ -105,6 +116,144 @@ define("bound-templates/compiler",
     }
 
     __exports__.hydrate = hydrate;
+  });
+
+define("bound-templates/runtime", 
+  ["bound-templates/stream","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var Stream = __dependency1__["default"];
+
+    function streamifyArgs(context, params, options) {
+      var helpers = options.helpers;
+
+      // Convert ID params to streams
+      for (var i = 0, l = params.length; i < l; i++) {
+        if (options.types[i] === 'id') {
+          params[i] = helpers.STREAM_FOR(context, params[i]);
+        }
+      }
+
+      // Convert hash ID values to streams
+      var hash = options.hash,
+          hashTypes = options.hashTypes;
+      for (var key in hash) {
+        if (hashTypes[key] === 'id') {
+          hash[key] = helpers.STREAM_FOR(context, hash[key]);
+        }
+      }
+    }
+
+    function RESOLVE(context, path, params, options) {
+      var helpers = options.helpers,
+          helper = helpers[path];
+      if (helper) {
+        streamifyArgs(context, params, options);
+
+        var fragmentStream = helper(params, options);
+        if (fragmentStream) {
+          fragmentStream.subscribe(function(value) {
+            options.range.replace(value);
+          });
+        }
+      } else {
+        var stream = helpers.STREAM_FOR(context, path);
+
+        stream.subscribe(function(value) {
+          options.range.clear();
+          if (options.escaped) {
+            options.range.appendText(value);
+          } else {
+            options.range.appendHTML(value);
+          }
+        });
+      }
+    }
+
+    __exports__.RESOLVE = RESOLVE;// FIXME
+    function AttributeBuilder() {
+      var self = this;
+
+      this.parts = [];
+      this.values = [];
+      this.next = null;
+
+      this.stream = new Stream(function(next) {
+        self.next = next;
+      });
+    }
+
+    AttributeBuilder.prototype = {
+      stream: null,
+
+      string: function() {
+        return this.values.join('');
+      },
+
+      pushStatic: function(value) {
+        this.parts.push(value);
+        this.values.push(value);
+      },
+
+      pushStream: function(stream) {
+        var builder = this,
+            streamIndex = this.parts.length;
+
+        this.parts.push(stream);
+        this.values.push('');
+
+        stream.subscribe(function(value) {
+          builder.updateValueAt(streamIndex, value);
+        });
+      },
+
+      updateValueAt: function(streamIndex, value) {
+        this.values[streamIndex] = value;
+        this.next(this.string());
+      },
+
+      subscribe: function(next) {
+        var unsubscribe = this.stream.subscribe.apply(this.stream, arguments);
+        next(this.string());
+        return unsubscribe;
+      }
+    };
+
+    function ATTRIBUTE(context, name, params, options) {
+      var helpers = options.helpers,
+          builder = new AttributeBuilder(name); // TODO: make this hookable
+
+      params.forEach(function(node) {
+        if (typeof node === 'string') {
+          builder.pushStatic(node);
+        } else {
+          var helperOptions = node[2];
+          helperOptions.helpers = helpers;
+
+          // TODO: support attributes returning more than streams
+          var stream = helpers.RESOLVE_IN_ATTR(context, node[0], node[1], helperOptions);
+          builder.pushStream(stream);
+        }
+      });
+
+      builder.subscribe(function(value) {
+        options.element.setAttribute(name, value);
+      });
+    }
+
+    __exports__.ATTRIBUTE = ATTRIBUTE;function RESOLVE_IN_ATTR(context, path, params, options) {
+      var helpers = options.helpers,
+          helper = helpers[path];
+
+      if (helper) {
+        streamifyArgs(context, params, options);
+        return helper(params, options);
+      } else {
+        return helpers.STREAM_FOR(context, path);
+      }
+    }
+
+    __exports__.RESOLVE_IN_ATTR = RESOLVE_IN_ATTR;
   });
 
 define("bound-templates/stream", 
