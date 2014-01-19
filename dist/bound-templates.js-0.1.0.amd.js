@@ -26,7 +26,7 @@ define("bound-templates/compiler",
 
     function resolveHTML(model, parts, options) {
       var stream = new options.dom.PathObserver(model, parts.join(".")),
-          range = new Range(options.element, options.dom);
+          range = new Placeholder(options.element, options.dom);
 
       range.bind('innerHTML', stream);
       options.dom.appendRange(options.element, range);
@@ -100,18 +100,18 @@ define("bound-templates/runtime",
         var fragmentStream = helper(params, options);
         if (fragmentStream) {
           fragmentStream.subscribe(function(value) {
-            options.range.replace(value);
+            options.placeholder.replace(value);
           });
         }
       } else {
         var stream = helpers.STREAM_FOR(context, path);
 
         stream.subscribe(function(value) {
-          options.range.clear();
+          options.placeholder.clear();
           if (options.escaped) {
-            options.range.appendText(value);
+            options.placeholder.appendText(value);
           } else {
-            options.range.appendHTML(value);
+            options.placeholder.appendHTML(value);
           }
         });
       }
