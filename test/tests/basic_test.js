@@ -1,6 +1,6 @@
 import { defaultOptions, module, test, equal, merge } from "test_helpers";
 import { equalHTML } from "test_helpers";
-import { compile, PathObserver, STREAM_FOR } from "test_helpers";
+import { compile, PathObserver, STREAM_FOR, FragmentStream } from "test_helpers";
 import { notify } from "test_helpers";
 import { map, zipLatest } from "test_helpers";
 
@@ -34,6 +34,34 @@ test("Curlies can be updated when the model changes", function() {
   notify(model, 'hello');
 
   equalHTML(fragment, "<p>goodbye cruel world</p>");
+});
+
+test("Sexpr streams can be chained", function() {
+  var template = compile("<p>{{capitalize (reverse hello)}}</p>");
+
+  var options = merge({}, defaultOptions);
+
+  options.helpers.reverse = function(params, options) {
+    return map(params[0], function(value) {
+      return value.split('').reverse().join('');
+    });
+  };
+
+  options.helpers.capitalize = function(params, options) {
+    return map(params[0], function(value) {
+      return value.toUpperCase();
+    });
+  };
+
+  var model = { hello: "hello world" },
+      fragment = template(model, defaultOptions);
+
+  equalHTML(fragment, "<p>DLROW OLLEH</p>");
+
+  model.hello = "holy crap";
+  notify(model, 'hello');
+
+  equalHTML(fragment, "<p>PARC YLOH</p>");
 });
 
 test("Curlies without a parent can be updated when the model changes", function() {

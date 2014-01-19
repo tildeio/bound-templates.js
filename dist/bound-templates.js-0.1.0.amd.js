@@ -78,6 +78,10 @@ define("bound-templates/runtime",
       for (var i = 0, l = params.length; i < l; i++) {
         if (options.types[i] === 'id') {
           params[i] = helpers.STREAM_FOR(context, params[i]);
+        } else if (options.types[i] === 'sexpr') {
+          var sexprSpec = params[i];
+          sexprSpec[2].helpers = helpers;
+          params[i] = helpers.RESOLVE(context, sexprSpec[0], sexprSpec[1], sexprSpec[2]);
         }
       }
 
@@ -87,22 +91,44 @@ define("bound-templates/runtime",
       for (var key in hash) {
         if (hashTypes[key] === 'id') {
           hash[key] = helpers.STREAM_FOR(context, hash[key]);
+        } else if (hashTypes[key] === 'sexpr') {
+          var sexprSpec = hash[key];
+          sexprSpec[2].helpers = helpers;
+          hash[key] = helpers.RESOLVE(context, sexprSpec[0], sexprSpec[1], sexprSpec[2]);
         }
       }
+    }
+
+    function frag(element, string) {
+      if (element instanceof DocumentFragment) {
+        element = document.createElement('div');
+      }
+
+      var range = document.createRange();
+      range.setStart(element, 0);
+      range.collapse(false);
+      return range.createContextualFragment(string);
     }
 
     function RESOLVE(context, path, params, options) {
       var helpers = options.helpers,
           helper = helpers[path];
+
+      // TODO: use RESOLVE_HELPER approach to support late binding
       if (helper) {
         streamifyArgs(context, params, options);
 
-        var fragmentStream = helper(params, options);
-        if (fragmentStream) {
-          fragmentStream.subscribe(function(value) {
+        var stream = helper(params, options);
+        if (stream && options.placeholder) {
+          stream.subscribe(function(value) {
+            // Normalize into fragment if neither fragment nor element.
+            if (!value || value.nodeType !== 1 || value.nodeType !== 11) {
+              value = frag(options.placeholder.parent, value);
+            }
             options.placeholder.replace(value);
           });
         }
+        return stream;
       } else {
         var stream = helpers.STREAM_FOR(context, path);
 
