@@ -69,18 +69,21 @@ define("bound-templates/lazy-value",
   ["exports"],
   function(__exports__) {
     "use strict";
-    var NIL = function(){};
+    var NIL = function NIL(){}; // TODO: microoptimize... object literal, fn, or generated random value? :P
 
     function LazyValue(fn) {
       this.valueFn = fn;
     }
 
+    // TODO: Function.prototype.makeLazy helper?
+
     LazyValue.prototype = {
-      parent: null,
+      isLazyValue: true,
+      parent: null, // TODO: is parent even needed? could be modeled as a subscriber
       children: null,
       cache: NIL,
       valueFn: null,
-      subscribers: null,
+      subscribers: null, // TODO: do we need multiple subscribers?
 
       value: function() {
         var cache = this.cache;
@@ -88,24 +91,25 @@ define("bound-templates/lazy-value",
 
         var children = this.children,
             childValues = children && children.map(function(child) {
-              if (child instanceof this.constructor) {
+              if (child && child.isLazyValue) {
                 return child.value();
               } else {
                 return child;
               }
-            }, this);
+            });
 
         return this.cache = this.valueFn(childValues);
       },
 
       addDependentValue: function(value) {
-        if (!this.children) {
-          this.children = [value];
+        var children = this.children;
+        if (!children) {
+          children = this.children = [value];
         } else {
-          this.children.push(value);
+          children.push(value);
         }
 
-        if (value instanceof this.constructor) { value.parent = this; }
+        if (value && value.isLazyValue) { value.parent = this; }
       },
 
       expire: function() {
@@ -117,7 +121,7 @@ define("bound-templates/lazy-value",
           parent = this.parent;
           subscribers = this.subscribers;
 
-          this.cache = NIL;
+          cache = this.cache = NIL;
           parent && parent.expire();
           subscribers && subscribers.forEach(function(callback) { callback(); });
         }
