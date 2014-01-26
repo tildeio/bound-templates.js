@@ -76,13 +76,9 @@ test("Attribute helpers are can return streams", function() {
     equal(params[0], 'post');
     ok(params[1] instanceof LazyValue);
 
-    var lazyValue = new LazyValue(function(values) {
+    return new LazyValue(function(values) {
       return "/posts/" + values[0];
-    });
-
-    lazyValue.addDependentValue(params[1]);
-
-    return lazyValue;
+    }).addDependentValue(params[1]);
   };
 
   var model = { id: 1 },
@@ -106,14 +102,9 @@ test("Attribute helpers can merge path streams", function() {
     ok(hash.host instanceof LazyValue);
     ok(hash.path instanceof LazyValue);
 
-    var lazyValue = new LazyValue(function(values) {
+    return new LazyValue(function(values) {
       return "http://" + values[0] + "/" + values[1];
-    });
-
-    lazyValue.addDependentValue(hash.host);
-    lazyValue.addDependentValue(hash.path);
-
-    return lazyValue;
+    }).addDependentValue(hash.host).addDependentValue(hash.path);
   };
 
   var model = { host: "example.com", path: "hello" },

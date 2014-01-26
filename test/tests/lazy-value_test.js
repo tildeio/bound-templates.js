@@ -30,22 +30,22 @@ test("two children notifying a single parent", function() {
   equal(timesFooCalled, 1);
   equal(timesBarCalled, 1);
 
-  foo.expire();
+  foo.notify();
 
   equal(parent.value(), "foo1 bar0 baz", "value is correct");
   equal(timesParentCalled, 2, "parent called twice");
   equal(timesFooCalled, 2, "foo called twice");
   equal(timesBarCalled, 1, "bar still called once");
 
-  bar.expire();
-  bar.expire(); // multiple expirations don't affect computations
+  bar.notify();
+  bar.notify(); // multiple notifications don't affect computations
 
   equal(parent.value(), "foo1 bar1 baz", "value is correct");
   equal(timesParentCalled, 3, "parent called thrice");
   equal(timesFooCalled, 2, "foo called twice");
   equal(timesBarCalled, 2, "bar called twice");
 
-  parent.expire(); // expiring a parent doesn't expire children
+  parent.notify(); // notifying a parent doesn't notify children
 
   equal(parent.value(), "foo1 bar1 baz", "value is correct");
   equal(timesParentCalled, 4, "parent called four times");

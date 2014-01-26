@@ -69,7 +69,8 @@ define("bound-templates/lazy-value",
   ["exports"],
   function(__exports__) {
     "use strict";
-    var NIL = function NIL(){}; // TODO: microoptimize... object literal, fn, or generated random value? :P
+    var NIL = function NIL(){}, // TODO: microoptimize... object literal or fn? :P
+        EMPTY_ARRAY = [];
 
     function LazyValue(fn) {
       this.valueFn = fn;
@@ -84,21 +85,26 @@ define("bound-templates/lazy-value",
       cache: NIL,
       valueFn: null,
       subscribers: null, // TODO: do we need multiple subscribers?
+      _childValues: null, // just for reusing the array, might not work well if children.length changes after computation
 
       value: function() {
         var cache = this.cache;
         if (cache !== NIL) { return cache; }
 
-        var children = this.children,
-            childValues = children && children.map(function(child) {
-              if (child && child.isLazyValue) {
-                return child.value();
-              } else {
-                return child;
-              }
-            });
+        var children = this.children;
+        if (children) {
+          var child,
+              values = this._childValues || new Array(children.length);
 
-        return this.cache = this.valueFn(childValues);
+          for (var i = 0, l = children.length; i < l; i++) {
+            child = children[i];
+            values[i] = (child && child.isLazyValue) ? child.value() : child;
+          }
+
+          return this.cache = this.valueFn(values);
+        } else {
+          return this.cache = this.valueFn(EMPTY_ARRAY);
+        }
       },
 
       addDependentValue: function(value) {
@@ -110,9 +116,11 @@ define("bound-templates/lazy-value",
         }
 
         if (value && value.isLazyValue) { value.parent = this; }
+
+        return this;
       },
 
-      expire: function() {
+      notify: function(sender) {
         var cache = this.cache,
             parent,
             subscribers;
@@ -120,20 +128,28 @@ define("bound-templates/lazy-value",
         if (cache !== NIL) {
           parent = this.parent;
           subscribers = this.subscribers;
-
           cache = this.cache = NIL;
-          parent && parent.expire();
-          subscribers && subscribers.forEach(function(callback) { callback(); });
+
+          if (parent) { parent.notify(this); }
+          if (!subscribers) { return; }
+          for (var i = 0, l = subscribers.length; i < l; i++) {
+            subscribers[i](this); // TODO: should we worry about exception handling?
+          }
         }
       },
 
-      onExpire: function(callback) {
+      onNotify: function(callback) {
         var subscribers = this.subscribers;
         if (!subscribers) {
           subscribers = this.subscribers = [callback];
         } else {
           subscribers.push(callback);
         }
+        return this;
+      },
+
+      destroy: function() {
+        this.parent = this.children = this.cache = this.valueFn = this.subscribers = this._childValues = null;
       }
     };
 
@@ -182,8 +198,8 @@ define("bound-templates/runtime",
 
         var fragmentLazyValue = helper(params, options);
         if (fragmentLazyValue) {
-          fragmentLazyValue.onExpire(function() {
-            options.placeholder.replace(fragmentLazyValue.value());
+          fragmentLazyValue.onNotify(function(sender) {
+            options.placeholder.replace(sender.value());
           });
 
           options.placeholder.replace(fragmentLazyValue.value());
@@ -191,16 +207,16 @@ define("bound-templates/runtime",
       } else {
         var lazyValue = helpers.STREAM_FOR(context, path);
 
-        lazyValue.onExpire(function() {
+        lazyValue.onNotify(function(sender) {
           options.placeholder.clear();
-          updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
+          updatePlaceholder(options.placeholder, options.escaped, sender.value());
         });
 
         updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
       }
     }
 
-    __exports__.RESOLVE = RESOLVE;// FIXME
+    __exports__.RESOLVE = RESOLVE;// FIXME: We can implement this as a `concat` sexpr with LazyValues
     function AttributeBuilder() {
       var self = this;
 
@@ -232,8 +248,8 @@ define("bound-templates/runtime",
         this.parts.push(stream);
         this.values.push('');
 
-        stream.onExpire(function() {
-          builder.updateValueAt(streamIndex, stream.value());
+        stream.onNotify(function(sender) {
+          builder.updateValueAt(streamIndex, sender.value());
         });
 
         builder.updateValueAt(streamIndex, stream.value());

@@ -31,14 +31,11 @@ test("Block helpers can work and get updated", function() {
 
   var options = merge({}, defaultOptions);
   options.helpers["if"] = function(params, options) {
-    var conditionLazyValue = params[0],
-        lazyValue = new LazyValue(function(values) {
-          return values[0] ? options.render(options) : options.inverse(options)
-        });
+    var conditionLazyValue = params[0];
 
-    lazyValue.addDependentValue(conditionLazyValue);
-
-    return lazyValue;
+    return new LazyValue(function(values) {
+      return values[0] ? options.render(options) : options.inverse(options)
+    }).addDependentValue(conditionLazyValue);
   };
 
   var model = { truthy: true },

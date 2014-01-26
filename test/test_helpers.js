@@ -57,7 +57,7 @@ export function STREAM_FOR(context, path) {
   });
 
   addObserver(context, path, function() {
-    lazyValue.expire();
+    lazyValue.notify();
   });
 
   return lazyValue;
