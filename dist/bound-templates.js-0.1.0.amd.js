@@ -80,6 +80,7 @@ define("bound-templates/lazy-value",
       children: null,
       cache: NIL,
       valueFn: null,
+      subscribers: null,
 
       value: function() {
         var cache = this.cache;
@@ -108,11 +109,26 @@ define("bound-templates/lazy-value",
       },
 
       expire: function() {
-        var cache = this.cache;
+        var cache = this.cache,
+            parent,
+            subscribers;
 
         if (cache !== NIL) {
+          parent = this.parent;
+          subscribers = this.subscribers;
+
           this.cache = NIL;
-          this.parent && this.parent.expire();
+          parent && parent.expire();
+          subscribers && subscribers.forEach(function(callback) { callback(); });
+        }
+      },
+
+      onExpire: function(callback) {
+        var subscribers = this.subscribers;
+        if (!subscribers) {
+          subscribers = this.subscribers = [callback];
+        } else {
+          subscribers.push(callback);
         }
       }
     };
@@ -162,23 +178,19 @@ define("bound-templates/runtime",
 
         var fragmentLazyValue = helper(params, options);
         if (fragmentLazyValue) {
-          fragmentLazyValue.parent = {
-            expire: function() {
-              options.placeholder.replace(fragmentLazyValue.value());
-            }
-          };
+          fragmentLazyValue.onExpire(function() {
+            options.placeholder.replace(fragmentLazyValue.value());
+          });
 
           options.placeholder.replace(fragmentLazyValue.value());
         }
       } else {
         var lazyValue = helpers.STREAM_FOR(context, path);
 
-        lazyValue.parent = {
-          expire: function() {
-            options.placeholder.clear();
-            updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
-          }
-        };
+        lazyValue.onExpire(function() {
+          options.placeholder.clear();
+          updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
+        });
 
         updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
       }
@@ -216,11 +228,9 @@ define("bound-templates/runtime",
         this.parts.push(stream);
         this.values.push('');
 
-        stream.parent = {
-          expire: function() {
-            builder.updateValueAt(streamIndex, stream.value());
-          }
-        };
+        stream.onExpire(function() {
+          builder.updateValueAt(streamIndex, stream.value());
+        });
 
         builder.updateValueAt(streamIndex, stream.value());
       },
