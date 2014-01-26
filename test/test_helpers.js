@@ -29,6 +29,7 @@ export var strictEqual = window.strictEqual;
 module BoundTemplates from "bound-templates";
 import { merge } from "htmlbars/utils";
 import { default as Stream, map, zipLatest } from "bound-templates/stream";
+import LazyValue from "bound-templates/lazy-value";
 
 export function equalHTML(fragment, html) {
   var div = document.createElement("div");
@@ -37,7 +38,7 @@ export function equalHTML(fragment, html) {
   equal(div.innerHTML, html);
 }
 
-export { Stream, map, zipLatest, merge };
+export { LazyValue, map, zipLatest, merge };
 
 export function compile(string, options) {
   options = options || {};
@@ -51,7 +52,15 @@ export function compile(string, options) {
 }
 
 export function STREAM_FOR(context, path) {
-  return new PathObserver(context, path);
+  var lazyValue = new LazyValue(function() {
+    return get(context, path);
+  });
+
+  addObserver(context, path, function() {
+    lazyValue.expire();
+  });
+
+  return lazyValue;
 }
 
 export function get(model, path) {

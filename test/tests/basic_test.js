@@ -1,6 +1,6 @@
 import { defaultOptions, module, test, equal, merge } from "test_helpers";
 import { equalHTML } from "test_helpers";
-import { compile, PathObserver, STREAM_FOR } from "test_helpers";
+import { compile, LazyValue, STREAM_FOR } from "test_helpers";
 import { notify } from "test_helpers";
 import { map, zipLatest } from "test_helpers";
 
@@ -74,11 +74,15 @@ test("Attribute helpers are can return streams", function() {
   var options = merge({}, defaultOptions);
   options.helpers["link-to"] = function(params, objects) {
     equal(params[0], 'post');
-    ok(params[1] instanceof PathObserver);
+    ok(params[1] instanceof LazyValue);
 
-    return map(params[1], function(value) {
-      return "/posts/" + value;
+    var lazyValue = new LazyValue(function(values) {
+      return "/posts/" + values[0];
     });
+
+    lazyValue.addDependentValue(params[1]);
+
+    return lazyValue;
   };
 
   var model = { id: 1 },
@@ -99,12 +103,17 @@ test("Attribute helpers can merge path streams", function() {
   options.helpers["link-to"] = function(params, options) {
     var hash = options.hash;
 
-    ok(hash.host instanceof PathObserver);
-    ok(hash.path instanceof PathObserver);
+    ok(hash.host instanceof LazyValue);
+    ok(hash.path instanceof LazyValue);
 
-    return zipLatest(hash.host, hash.path, function(host, path) {
-      return "http://" + host + "/" + path;
+    var lazyValue = new LazyValue(function(values) {
+      return "http://" + values[0] + "/" + values[1];
     });
+
+    lazyValue.addDependentValue(hash.host);
+    lazyValue.addDependentValue(hash.path);
+
+    return lazyValue;
   };
 
   var model = { host: "example.com", path: "hello" },
@@ -145,8 +154,8 @@ test("Helper arguments get properly converted to streams when appropriate", func
   var options = merge({}, defaultOptions);
   options.helpers.testing = function(params, options) {
     equal(params[0], 'foo');
-    ok(params[1] instanceof PathObserver);
-    ok(options.hash.baz instanceof PathObserver);
+    ok(params[1] instanceof LazyValue);
+    ok(options.hash.baz instanceof LazyValue);
     equal(options.hash.seems, 'good');
   };
 

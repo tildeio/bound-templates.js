@@ -1,7 +1,7 @@
 import { defaultOptions, module, test, equal, merge } from "test_helpers";
 import { compile, equalHTML, notify } from "test_helpers";
 import { PathObserver, FragmentStream, map } from "test_helpers";
-import { default as Stream } from "bound-templates/stream";
+import LazyValue from "bound-templates/lazy-value";
 
 module("Fragment Test", {
 
@@ -31,13 +31,14 @@ test("Block helpers can work and get updated", function() {
 
   var options = merge({}, defaultOptions);
   options.helpers["if"] = function(params, options) {
-    var paramStream = params[0];
+    var conditionLazyValue = params[0],
+        lazyValue = new LazyValue(function(values) {
+          return values[0] ? options.render(options) : options.inverse(options)
+        });
 
-    return new FragmentStream(function(next) {
-      paramStream.subscribe(function(value) {
-        next(value ? options.render(options) : options.inverse(options));
-      });
-    });
+    lazyValue.addDependentValue(conditionLazyValue);
+
+    return lazyValue;
   };
 
   var model = { truthy: true },

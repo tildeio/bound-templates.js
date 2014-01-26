@@ -65,6 +65,61 @@ define("bound-templates/compiler",
     __exports__.hydrate = hydrate;
   });
 
+define("bound-templates/lazy-value", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    var NIL = function(){};
+
+    function LazyValue(fn) {
+      this.valueFn = fn;
+    }
+
+    LazyValue.prototype = {
+      parent: null,
+      children: null,
+      cache: NIL,
+      valueFn: null,
+
+      value: function() {
+        var cache = this.cache;
+        if (cache !== NIL) { return cache; }
+
+        var children = this.children,
+            childValues = children && children.map(function(child) {
+              if (child instanceof this.constructor) {
+                return child.value();
+              } else {
+                return child;
+              }
+            }, this);
+
+        return this.cache = this.valueFn(childValues);
+      },
+
+      addDependentValue: function(value) {
+        if (!this.children) {
+          this.children = [value];
+        } else {
+          this.children.push(value);
+        }
+
+        if (value instanceof this.constructor) { value.parent = this; }
+      },
+
+      expire: function() {
+        var cache = this.cache;
+
+        if (cache !== NIL) {
+          this.cache = NIL;
+          this.parent && this.parent.expire();
+        }
+      }
+    };
+
+    __exports__["default"] = LazyValue;
+  });
+
 define("bound-templates/runtime", 
   ["bound-templates/stream","exports"],
   function(__dependency1__, __exports__) {
@@ -91,29 +146,41 @@ define("bound-templates/runtime",
       }
     }
 
+    function updatePlaceholder(placeholder, escaped, value) {
+      if (escaped) {
+        placeholder.appendText(value);
+      } else {
+        placeholder.appendHTML(value);
+      }
+    }
+
     function RESOLVE(context, path, params, options) {
       var helpers = options.helpers,
           helper = helpers[path];
       if (helper) {
         streamifyArgs(context, params, options);
 
-        var fragmentStream = helper(params, options);
-        if (fragmentStream) {
-          fragmentStream.subscribe(function(value) {
-            options.placeholder.replace(value);
-          });
+        var fragmentLazyValue = helper(params, options);
+        if (fragmentLazyValue) {
+          fragmentLazyValue.parent = {
+            expire: function() {
+              options.placeholder.replace(fragmentLazyValue.value());
+            }
+          };
+
+          options.placeholder.replace(fragmentLazyValue.value());
         }
       } else {
-        var stream = helpers.STREAM_FOR(context, path);
+        var lazyValue = helpers.STREAM_FOR(context, path);
 
-        stream.subscribe(function(value) {
-          options.placeholder.clear();
-          if (options.escaped) {
-            options.placeholder.appendText(value);
-          } else {
-            options.placeholder.appendHTML(value);
+        lazyValue.parent = {
+          expire: function() {
+            options.placeholder.clear();
+            updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
           }
-        });
+        };
+
+        updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
       }
     }
 
@@ -149,9 +216,13 @@ define("bound-templates/runtime",
         this.parts.push(stream);
         this.values.push('');
 
-        stream.subscribe(function(value) {
-          builder.updateValueAt(streamIndex, value);
-        });
+        stream.parent = {
+          expire: function() {
+            builder.updateValueAt(streamIndex, stream.value());
+          }
+        };
+
+        builder.updateValueAt(streamIndex, stream.value());
       },
 
       updateValueAt: function(streamIndex, value) {
