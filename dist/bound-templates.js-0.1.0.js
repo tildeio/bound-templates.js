@@ -52,11 +52,11 @@ var define, requireModule;
 })();
 
 define("bound-templates", 
-  ["htmlbars/compiler","bound-templates/stream","bound-templates/runtime","htmlbars/utils","exports"],
+  ["htmlbars/compiler","bound-templates/lazy-value","bound-templates/runtime","htmlbars/utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
     var htmlbarsCompile = __dependency1__.compile;
-    var Stream = __dependency2__.Stream;
+    var LazyValue = __dependency2__.LazyValue;
     var RESOLVE = __dependency3__.RESOLVE;
     var RESOLVE_IN_ATTR = __dependency3__.RESOLVE_IN_ATTR;
     var ATTRIBUTE = __dependency3__.ATTRIBUTE;
@@ -66,16 +66,15 @@ define("bound-templates",
       return htmlbarsCompile(string, options);
     }
 
-    __exports__.compile = compile;__exports__.Stream = Stream;
+    __exports__.compile = compile;__exports__.LazyValue = LazyValue;
   });
 
 define("bound-templates/compiler", 
-  ["htmlbars/runtime","htmlbars/utils","bound-templates/stream","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
+  ["htmlbars/runtime","htmlbars/utils","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     var hydrateTemplate = __dependency1__.hydrate;
     var merge = __dependency2__.merge;
-    var whenChanged = __dependency3__.whenChanged;
 
     function resolveHTML(model, parts, options) {
       var stream = new options.dom.PathObserver(model, parts.join(".")),
@@ -210,10 +209,10 @@ define("bound-templates/lazy-value",
   });
 
 define("bound-templates/runtime", 
-  ["bound-templates/stream","exports"],
+  ["bound-templates/lazy-value","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
-    var Stream = __dependency1__["default"];
+    var LazyValue = __dependency1__["default"];
 
     function streamifyArgs(context, params, options) {
       var helpers = options.helpers;
@@ -269,77 +268,30 @@ define("bound-templates/runtime",
       }
     }
 
-    __exports__.RESOLVE = RESOLVE;// FIXME: We can implement this as a `concat` sexpr with LazyValues
-    function AttributeBuilder() {
-      var self = this;
-
-      this.parts = [];
-      this.values = [];
-      this.next = null;
-
-      this.stream = new Stream(function(next) {
-        self.next = next;
-      });
-    }
-
-    AttributeBuilder.prototype = {
-      stream: null,
-
-      string: function() {
-        return this.values.join('');
-      },
-
-      pushStatic: function(value) {
-        this.parts.push(value);
-        this.values.push(value);
-      },
-
-      pushStream: function(stream) {
-        var builder = this,
-            streamIndex = this.parts.length;
-
-        this.parts.push(stream);
-        this.values.push('');
-
-        stream.onNotify(function(sender) {
-          builder.updateValueAt(streamIndex, sender.value());
-        });
-
-        builder.updateValueAt(streamIndex, stream.value());
-      },
-
-      updateValueAt: function(streamIndex, value) {
-        this.values[streamIndex] = value;
-        this.next(this.string());
-      },
-
-      subscribe: function(next) {
-        var unsubscribe = this.stream.subscribe.apply(this.stream, arguments);
-        next(this.string());
-        return unsubscribe;
-      }
-    };
-
-    function ATTRIBUTE(context, name, params, options) {
+    __exports__.RESOLVE = RESOLVE;function ATTRIBUTE(context, name, params, options) {
       var helpers = options.helpers,
-          builder = new AttributeBuilder(name); // TODO: make this hookable
+          builder = new LazyValue(function(values) {
+            return values.join('');
+          });
 
       params.forEach(function(node) {
         if (typeof node === 'string') {
-          builder.pushStatic(node);
+          builder.addDependentValue(node);
         } else {
           var helperOptions = node[2];
           helperOptions.helpers = helpers;
 
           // TODO: support attributes returning more than streams
           var stream = helpers.RESOLVE_IN_ATTR(context, node[0], node[1], helperOptions);
-          builder.pushStream(stream);
+          builder.addDependentValue(stream);
         }
       });
 
-      builder.subscribe(function(value) {
-        options.element.setAttribute(name, value);
+      builder.onNotify(function(lazyValue) {
+        options.element.setAttribute(name, lazyValue.value());
       });
+
+      options.element.setAttribute(name, builder.value());
     }
 
     __exports__.ATTRIBUTE = ATTRIBUTE;function RESOLVE_IN_ATTR(context, path, params, options) {
