@@ -1,4 +1,9 @@
-import { compile, defaultOptions, module, test, equal, equalHTML, LazyValue } from "test_helpers";
+import { compile, defaultOptions, module, test, equal, equalHTML, LazyValue, notify } from "test_helpers";
+
+function set(context, property, value) {
+  context[property] = value;
+  notify(context, property);
+}
 
 module("Subexpressions", {
   setup: function() {
@@ -20,16 +25,24 @@ module("Subexpressions", {
 
 test("in element", function() {
   var template = compile("<div>{{concat 'foo' (concat bar 'baz')}}</div>"),
-      context = {bar: 'bar'};
+      context = {bar: 'bar'},
+      fragment = template(context, defaultOptions);
 
-  equalHTML(template(context, defaultOptions), "<div>foobarbaz</div>");
+  equalHTML(fragment, "<div>foobarbaz</div>");
+
+  set(context, 'bar', 'BAR');
+  equalHTML(fragment, "<div>fooBARbaz</div>");
 });
 
 test("inside attribute", function() {
   var template = compile("<div class='{{concat 'foo' (concat bar 'baz')}}'></div>"),
-      context = {bar: 'bar'};
+      context = {bar: 'bar'},
+      fragment = template(context, defaultOptions);
 
-  equalHTML(template(context, defaultOptions), '<div class="foobarbaz"></div>');
+  equalHTML(fragment, '<div class="foobarbaz"></div>');
+
+  set(context, 'bar', 'BAR');
+  equalHTML(fragment, '<div class="fooBARbaz"></div>');
 });
 
 // We consider the use of "transform" helpers, like concat, invalid for use in elements.
