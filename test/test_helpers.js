@@ -137,13 +137,15 @@ export function FragmentStream(callback) {
   };
 }
 
-import { RESOLVE, ATTRIBUTE, RESOLVE_IN_ATTR } from "bound-templates/runtime";
+import { CONTENT, ATTRIBUTE, ELEMENT, SUBEXPR, LOOKUP_HELPER } from "bound-templates/runtime";
 
 var helpers = {
   STREAM_FOR: STREAM_FOR,
-  RESOLVE: RESOLVE,
+  CONTENT: CONTENT,
   ATTRIBUTE: ATTRIBUTE,
-  RESOLVE_IN_ATTR: RESOLVE_IN_ATTR
+  ELEMENT: ELEMENT,
+  SUBEXPR: SUBEXPR,
+  LOOKUP_HELPER: LOOKUP_HELPER
 };
 
 export var defaultOptions = {

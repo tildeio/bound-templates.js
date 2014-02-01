@@ -106,11 +106,13 @@ define("htmlbars/compiler",
     __exports__.compileSpec = compileSpec;
   });
 define("htmlbars/compiler/ast_walker", 
-  ["htmlbars/ast","exports"],
-  function(__dependency1__, __exports__) {
+  ["htmlbars/ast","handlebars/compiler/ast","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     var HTMLElement = __dependency1__.HTMLElement;
     var BlockElement = __dependency1__.BlockElement;
+    var AST = __dependency2__["default"];
+    var MustacheNode = AST.MustacheNode;
 
     function Frame(children, parent, isBlock) {
       this.parent = parent;
@@ -120,13 +122,13 @@ define("htmlbars/compiler/ast_walker",
       // cursor
       this.pos = this.length-1;
       this.inverse = false;
-      this.close = false;
 
       // block tracking
       this.isBlock = isBlock;
       this.block = isBlock ? this : parent.block;
       this.stack = isBlock ? [['endTemplate']] : null;
       this.count = 0;
+      this.mustacheCount = 0;
     }
 
     Frame.prototype.next = function() {
@@ -142,6 +144,7 @@ define("htmlbars/compiler/ast_walker",
         if (typeof node === 'string') {
           this.block.stack.push(['text', node, this.pos, this.length]);
         } else if (node instanceof BlockElement) {
+          this.mustacheCount++;
           this.block.stack.push(['block', node, this.pos, this.length]);
           if (node.inverse) {
             this.inverse = true;
@@ -153,15 +156,24 @@ define("htmlbars/compiler/ast_walker",
             return new Frame(node.children, this, true);
           }
         } else if (node instanceof HTMLElement) {
-          if (this.close) {
-            this.close = false;
-            this.block.stack.push(['openElement', node, this.pos, this.length]);
+          if (this.childElementFrame) {
+            this.block.stack.push(['openElement', node, this.pos, this.length, this.childElementFrame.mustacheCount]);
+            if (this.childElementFrame.mustacheCount) {
+              // We only increment once vs add the mustache count because a child
+              // element with multiple nodes is just a single consumer.
+              this.mustacheCount++;
+            }
+            this.childElementFrame = null;
           } else {
-            this.close = true;
             this.block.stack.push(['closeElement', node, this.pos, this.length]);
-            return new Frame(node.children, this, false);
+            this.childElementFrame = new Frame(node.children, this, false);
+            this.childElementFrame.mustacheCount = node.helpers.length;
+            return this.childElementFrame;
           }
         } else {
+          if (node instanceof MustacheNode) {
+            this.mustacheCount++;
+          }
           this.block.stack.push(['node', node, this.pos, this.length]);
         }
         this.pos--;
@@ -2529,27 +2541,42 @@ define("htmlbars/compiler/hydration",
 
     function HydrationCompiler() {
       this.stack = [];
+      this.source = [];
       this.mustaches = [];
+      this.parents = ['fragment'];
+      this.parentCount = 0;
+      this.declarations = [];
     }
 
     var prototype = HydrationCompiler.prototype;
 
-    prototype.compile = function(opcodes, childTemplates) {
+    prototype.compile = function(opcodes) {
       this.stack.length = 0;
       this.mustaches.length = 0;
+      this.source.length = 0;
+      this.parents.length = 1;
+      this.declarations.length = 0;
+      this.parentCount = 0;
 
       processOpcodes(this, opcodes);
 
-      var fn =  'function hydrate(fragment) {\n';
-      for (var i=0, l=childTemplates.length; i<l; i++) {
-        fn +=   '  var child' + i + '=' + childTemplates[i] + ';\n';
+      if (this.declarations.length) {
+        var decs = "  var ";
+        for (var i = 0, l = this.declarations.length; i < l; ++i) {
+          var dec = this.declarations[i];
+          decs += dec[0];
+          decs += " = ";
+          decs += dec[1];
+          if (i+1 === l) {
+            decs += ';\n';
+          } else {
+            decs += ', ';
+          }
+        }
+        this.source.unshift(decs);
       }
-      fn +=     '  return [\n' +
-                '  ' + this.mustaches.join(',\n  ') + '\n' +
-                '  ];\n' +
-                '}\n';
 
-      return fn;
+      return this.source.join('');
     };
 
     prototype.program = function(programId, inverseId) {
@@ -2576,14 +2603,14 @@ define("htmlbars/compiler/hydration",
       this.stack.push(literal);
     };
 
-    prototype.helper = function(name, size, escaped, parentPath, startIndex, endIndex) {
+    prototype.helper = function(name, size, escaped, placeholderNum) {
       var prepared = prepareHelper(this.stack, size);
       prepared.options.push('escaped:'+escaped);
-      this.pushMustachePlaceholder(string(name), prepared.args, prepared.options, parentPath, startIndex, endIndex);
+      this.pushMustacheInContent(string(name), prepared.args, prepared.options, placeholderNum);
     };
 
-    prototype.ambiguous = function(str, escaped, parentPath, startIndex, endIndex) {
-      this.pushMustachePlaceholder(string(str), '[]', ['escaped:'+escaped], parentPath, startIndex, endIndex);
+    prototype.ambiguous = function(str, escaped, placeholderNum) {
+      this.pushMustacheInContent(string(str), '[]', ['escaped:'+escaped], placeholderNum);
     };
 
     prototype.ambiguousAttr = function(str, escaped) {
@@ -2599,53 +2626,54 @@ define("htmlbars/compiler/hydration",
 
     prototype.sexpr = function(name, size) {
       var prepared = prepareHelper(this.stack, size);
-      this.stack.push('['+string(name)+','+prepared.args+','+ hash(prepared.options)+']');
+
+      //export function SUBEXPR(helperName, context, params, options) {
+      this.stack.push('helpers.SUBEXPR(' + string(name) + ', context, ' + prepared.args + ', ' + hash(prepared.options) + ', helpers)');
     };
 
     prototype.string = function(str) {
       this.stack.push(string(str));
     };
 
-    prototype.attribute = function(name, size, elementPath) {
-      var args = [];
-      for (var i = 0; i < size; i++) {
-        args.push(this.stack.pop());
-      }
-
-      var element = "fragment";
-      for (i=0; i<elementPath.length; i++) {
-        element += ".childNodes["+elementPath[i]+"]";
-      }
-      var pairs = ['element:'+element, 'name:'+string(name)];
-      this.mustaches.push('["ATTRIBUTE", ['+ args +'],'+hash(pairs)+']');
-    };
-
-    prototype.nodeHelper = function(name, size, elementPath) {
+    prototype.nodeHelper = function(name, size) {
       var prepared = prepareHelper(this.stack, size);
-      this.pushMustacheInNode(string(name), prepared.args, prepared.options, elementPath);
+      this.pushMustacheInNode(string(name), prepared.args, prepared.options);
     };
 
-    prototype.pushMustachePlaceholder = function(name, args, pairs, parentPath, startIndex, endIndex) {
-      var parent = "fragment";
-      for (var i=0; i<parentPath.length; i++) {
-        parent += ".childNodes["+parentPath[i]+"]";
-      }
+    prototype.placeholder = function(num, parentPath, startIndex, endIndex) {
+      var parentIndex = parentPath.length === 0 ? 0 : parentPath[parentPath.length-1];
+      var parent = this.getParent();
       var placeholder = "new Placeholder("+parent+","+
         (startIndex === null ? "-1" : startIndex)+","+
         (endIndex === null ? "-1" : endIndex)+")";
 
-      pairs.push('placeholder:'+placeholder);
-
-      this.mustaches.push('['+name+','+args+','+hash(pairs)+']');
+      this.declarations.push(['placeholder' + num, placeholder]);
     };
 
-    prototype.pushMustacheInNode = function(name, args, pairs, elementPath) {
-      var element = "fragment";
-      for (var i=0; i<elementPath.length; i++) {
-        element += ".childNodes["+elementPath[i]+"]";
-      }
-      pairs.push('element:'+element);
-      this.mustaches.push('['+name+','+args+','+hash(pairs)+']');
+    prototype.pushMustacheInContent = function(name, args, pairs, placeholderNum) {
+      this.source.push('  helpers.CONTENT(placeholder' + placeholderNum + ', ' + name + ', context, ' + args + ', ' + hash(pairs) + ', helpers);\n');
+    };
+
+    prototype.pushMustacheInNode = function(name, args, pairs) {
+      this.source.push('  helpers.ELEMENT(' + this.getParent() + ', ' + name + ', context, ' + args + ', ' + hash(pairs) + ', helpers);\n');
+    };
+
+    prototype.shareParent = function(i) {
+      var parentNodesName = "parent" + this.parentCount++;
+      this.declarations.push([parentNodesName, this.getParent() + '.childNodes[' + i + ']']);
+      this.parents.push(parentNodesName);
+    };
+
+    prototype.consumeParent = function(i) {
+      this.parents.push(this.getParent() + '.childNodes[' + i + ']');
+    };
+
+    prototype.popParent = function() {
+      this.parents.pop();
+    };
+
+    prototype.getParent = function() {
+      return this.parents[this.parents.length-1];
     };
 
     __exports__.HydrationCompiler = HydrationCompiler;
@@ -2661,6 +2689,8 @@ define("htmlbars/compiler/hydration_opcode",
       this.paths = [];
       this.templateId = 0;
       this.currentDOMChildIndex = 0;
+      this.placeholders = [];
+      this.placeholderNum = 0;
     }
 
     HydrationOpcodeCompiler.prototype.compile = function(ast) {
@@ -2672,18 +2702,31 @@ define("htmlbars/compiler/hydration_opcode",
     HydrationOpcodeCompiler.prototype.startTemplate = function() {
       this.opcodes.length = 0;
       this.paths.length = 0;
+      this.placeholders.length = 0;
       this.templateId = 0;
       this.currentDOMChildIndex = -1;
+      this.placeholderNum = 0;
     };
 
-    HydrationOpcodeCompiler.prototype.endTemplate = function() {};
+    HydrationOpcodeCompiler.prototype.endTemplate = function() {
+      distributePlaceholders(this.placeholders, this.opcodes);
+    };
 
     HydrationOpcodeCompiler.prototype.text = function(string) {
       ++this.currentDOMChildIndex;
     };
 
-    HydrationOpcodeCompiler.prototype.openElement = function(element) {
-      this.paths.push(++this.currentDOMChildIndex);
+    HydrationOpcodeCompiler.prototype.openElement = function(element, pos, len, mustacheCount) {
+      distributePlaceholders(this.placeholders, this.opcodes);
+      ++this.currentDOMChildIndex;
+
+      if (mustacheCount > 1) {
+        this.opcode('shareParent', this.currentDOMChildIndex);
+      } else {
+        this.opcode('consumeParent', this.currentDOMChildIndex);
+      }
+
+      this.paths.push(this.currentDOMChildIndex);
       this.currentDOMChildIndex = -1;
 
       element.attributes.forEach(function(attribute) {
@@ -2696,6 +2739,8 @@ define("htmlbars/compiler/hydration_opcode",
     };
 
     HydrationOpcodeCompiler.prototype.closeElement = function(element) {
+      distributePlaceholders(this.placeholders, this.opcodes);
+      this.opcode('popParent');
       this.currentDOMChildIndex = this.paths.pop();
     };
 
@@ -2710,10 +2755,13 @@ define("htmlbars/compiler/hydration_opcode",
       var start = (currentDOMChildIndex < 0 ? null : currentDOMChildIndex),
           end = (childIndex === childrenLength - 1 ? null : currentDOMChildIndex + 1);
 
+      var placeholderNum = this.placeholderNum++;
+      this.placeholders.push([placeholderNum, this.paths.slice(), start, end]);
+
       this.opcode('program', this.templateId++, block.inverse === null ? null : this.templateId++);
       processParams(this, mustache.params);
       processHash(this, mustache.hash);
-      this.opcode('helper', mustache.id.string, mustache.params.length, mustache.escaped, this.paths.slice(), start, end);
+      this.opcode('helper', mustache.id.string, mustache.params.length, mustache.escaped, placeholderNum);
     };
 
     HydrationOpcodeCompiler.prototype.opcode = function(type) {
@@ -2728,18 +2776,26 @@ define("htmlbars/compiler/hydration_opcode",
         return;
       }
 
+      // We treat attribute like a ATTRIBUTE helper evaluated by the ELEMENT hook.
+      // <p {{ATTRIBUTE 'class' 'foo ' (bar)}}></p>
+
+      // Unwrapped any mustaches to just be their internal sexprs.
       var node;
       for (var i = value.length - 1; i >= 0; i--) {
         node = value[i];
-
-        if (typeof node === 'string') {
-          this.string(node);
-        } else {
-          this[node.type + 'InAttr'](node);
+        if (typeof node !== 'string') {
+          value[i] = node.sexpr;
         }
       }
 
-      this.opcode('attribute', name, value.length, this.paths.slice());
+      value.unshift(name);
+      this.nodeHelper({
+        params: value,
+        hash: null,
+        id: {
+          string: 'ATTRIBUTE'
+        }
+      });
     };
 
     HydrationOpcodeCompiler.prototype.nodeHelper = function(mustache) {
@@ -2755,18 +2811,24 @@ define("htmlbars/compiler/hydration_opcode",
       var start = currentDOMChildIndex,
           end = (childIndex === childrenLength - 1 ? -1 : currentDOMChildIndex + 1);
 
+      var placeholderNum = this.placeholderNum++;
+      this.placeholders.push([placeholderNum, this.paths.slice(), start, end]);
+
       if (mustache.isHelper) {
         this.opcode('program', null, null);
         processParams(this, mustache.params);
         processHash(this, mustache.hash);
-        this.opcode('helper', mustache.id.string, mustache.params.length, mustache.escaped, this.paths.slice(), start, end);
+        this.opcode('helper', mustache.id.string, mustache.params.length, mustache.escaped, placeholderNum);
       } else {
-        this.opcode('ambiguous', mustache.id.string, mustache.escaped, this.paths.slice(), start, end);
+        this.opcode('ambiguous', mustache.id.string, mustache.escaped, placeholderNum);
       }
     };
 
     HydrationOpcodeCompiler.prototype.sexpr = function(sexpr) {
+      // I think this needs to move to sexpr in other compiler.
+      // We're pushing the 'sexpr' type for the parent fn to eval.
       this.string('sexpr');
+
       this.opcode('program', null, null);
       processParams(this, sexpr.params);
       processHash(this, sexpr.hash);
@@ -2806,7 +2868,11 @@ define("htmlbars/compiler/hydration_opcode",
 
     function processParams(compiler, params) {
       params.forEach(function(param) {
-        compiler[param.type](param);
+        if (param.type) {
+          compiler[param.type](param);
+        } else {
+          compiler.STRING({ stringModeValue: param });
+        }
       });
     }
 
@@ -2821,6 +2887,29 @@ define("htmlbars/compiler/hydration_opcode",
       } else {
         compiler.opcode('stackLiteral', 0);
       }
+    }
+
+    function distributePlaceholders(placeholders, opcodes) {
+      if (placeholders.length === 0) {
+        return;
+      }
+
+      // Splice placeholders after the most recent shareParent/consumeParent.
+      var o;
+      for (o = opcodes.length - 1; o >= 0; --o) {
+        var opcode = opcodes[o][0];
+        if (opcode === 'shareParent' || opcode === 'consumeParent' || opcode === 'popParent') {
+          break;
+        }
+      }
+
+      var spliceArgs = [o + 1, 0];
+      for (var i = 0; i < placeholders.length; ++i) {
+        var p = placeholders[i];
+        spliceArgs.push(['placeholder', [p[0], p[1], p[2], p[3]]]);
+      }
+      opcodes.splice.apply(opcodes, spliceArgs);
+      placeholders.length = 0;
     }
 
     __exports__.HydrationOpcodeCompiler = HydrationOpcodeCompiler;
@@ -2903,45 +2992,36 @@ define("htmlbars/compiler/template",
 
       // function hydrate(fragment) { return mustaches; }
       var hydrationProgram = this.hydrationCompiler.compile(
-        this.hydrationOpcodeCompiler.opcodes, this.childTemplates
+        this.hydrationOpcodeCompiler.opcodes
       );
+
+      var childTemplateVars = "";
+      for (var i=0, l=this.childTemplates.length; i<l; i++) {
+        childTemplateVars +=   '  var child' + i + '=' + this.childTemplates[i] + ';\n';
+      }
 
       var template =
         '(function (){\n' +
+          childTemplateVars +
           fragmentProgram +
-          hydrationProgram +
         'var cachedFragment = null;\n' +
         'return function template(context, options) {\n' +
         '  if (cachedFragment === null) {\n' +
         '    cachedFragment = build(dom);\n' +
         '  }\n' +
-        '  var clone = cachedFragment.cloneNode(true);\n' +
-        '  var mustaches = hydrate(clone);\n' +
+        '  var fragment = cachedFragment.cloneNode(true);\n' +
         '  var helpers = options && options.helpers || {};\n' +
-        '  var mustache;\n' +
-        '  for (var i = 0, l = mustaches.length; i < l; i++) {\n' +
-        '    mustache = mustaches[i];\n' +
-        '    var name = mustache[0],\n' +
-        '        params = mustache[1],\n' +
-        '        helperOptions = mustache[2];\n' +
-        '    helperOptions.helpers = helpers;\n' +
-        '    helperOptions.data = options.data;\n' +
-        '    if (name === "ATTRIBUTE") {\n' +
-        '      helpers.ATTRIBUTE(context, helperOptions.name, params, helperOptions);\n' +
-        '    } else {\n' +
-        '      helpers.RESOLVE(context, name, params, helperOptions);\n' +
-        '    }\n' +
-        '  }\n' +
-        '  return clone;\n' +
+           hydrationProgram +
+        '  return fragment;\n' +
         '};\n' +
         '}())';
 
       this.templates.push(template);
     };
 
-    TemplateCompiler.prototype.openElement = function(element, i, l) {
-      this.fragmentOpcodeCompiler.openElement(element, i, l);
-      this.hydrationOpcodeCompiler.openElement(element, i, l);
+    TemplateCompiler.prototype.openElement = function(element, i, l, c) {
+      this.fragmentOpcodeCompiler.openElement(element, i, l, c);
+      this.hydrationOpcodeCompiler.openElement(element, i, l, c);
     };
 
     TemplateCompiler.prototype.closeElement = function(element, i, l) {
@@ -3286,91 +3366,62 @@ define("htmlbars/runtime/dom_helpers",
     __exports__.domHelpers = domHelpers;
   });
 define("htmlbars/runtime/helpers", 
-  ["exports"],
-  function(__exports__) {
+  ["handlebars/safe-string","exports"],
+  function(__dependency1__, __exports__) {
     "use strict";
-    // Sexprs are recursively evaluated at RESOLVE time and the
-    // return value of the sexpr helper is passed in to the parent helper.
-    function evaluateSexprs(context, params, types, helpers) {
-      var sexprSpec, i, len;
-      for (i = 0, len = params.length; i < len; ++i) {
-        if (types[i] === 'sexpr') {
-          sexprSpec = params[i];
-          sexprSpec[2].helpers = helpers; // TODO seems like this should be compiled in, no?
-          params[i] = helpers.RESOLVE(context, sexprSpec[0], sexprSpec[1], sexprSpec[2]);
-        }
-      }
-    }
+    var SafeString = __dependency1__["default"];
 
-    function evaluateHashSexprs(context, hash, hashTypes, helpers) {
-      var k, sexprSpec;
-      for (k in hash) {
-        if (hash.hasOwnProperty(k) && hashTypes[k] === 'sexpr') {
-          sexprSpec = hash[k];
-          sexprSpec[2].helpers = helpers; // TODO seems like this should be compiled in, no?
-          hash[k] = helpers.RESOLVE(context, sexprSpec[0], sexprSpec[1], sexprSpec[2]);
-        }
-      }
-    }
-
-    function RESOLVE(context, path, params, options) {
-      var helper = options.helpers[path];
-
-      // TODO: use something like RESOLVE_HELPER to allow late-binding.
+    function CONTENT(placeholder, helperName, context, params, options) {
+      var value, helper = this.LOOKUP_HELPER(helperName, context, options);
       if (helper) {
-
-        evaluateSexprs(context, params, options.types, options.helpers);
-        evaluateHashSexprs(context, options.hash, options.hashTypes, options.helpers);
-
-        var ret = helper(context, params, options);
-        if (ret && options.placeholder) {
-          options.placeholder.appendText(ret);
-        }
-        return ret;
+        value = helper(context, params, options);
       } else {
-        var value = context[path];
+        value = this.SIMPLE(context, helperName, options);
+      }
+      if (!options.escaped) {
+        value = new SafeString(value);
+      }
+      placeholder.replace(value);
+    }
 
-        if (options.escaped) {
-          options.placeholder.appendText(value);
-        } else {
-          options.placeholder.appendHTML(value);
-        }
+    __exports__.CONTENT = CONTENT;function ELEMENT(element, helperName, context, params, options) {
+      var helper = this.LOOKUP_HELPER(helperName, context, options);
+      if (helper) {
+        options.element = element;
+        helper(context, params, options);
       }
     }
 
-    __exports__.RESOLVE = RESOLVE;function RESOLVE_IN_ATTR(context, path, params, options) {
-      var helpers = options.helpers,
-          helper = helpers[path];
+    __exports__.ELEMENT = ELEMENT;function ATTRIBUTE(context, params, options) {
+      for (var i = 1, l = params.length; i < l; ++i) {
+        if (options.types[i] === 'id') {
+          params[i] = this.SIMPLE(context, params[i], options);
+        }
+      }
 
+      options.element.setAttribute(params[0], params.slice(1).join(''));
+    }
+
+    __exports__.ATTRIBUTE = ATTRIBUTE;function SUBEXPR(helperName, context, params, options) {
+      var helper = this.LOOKUP_HELPER(helperName, context, options);
       if (helper) {
         return helper(context, params, options);
       } else {
-        return context[path];
+        return this.SIMPLE(context, helperName, options);
       }
     }
 
-    __exports__.RESOLVE_IN_ATTR = RESOLVE_IN_ATTR;function ATTRIBUTE(context, name, params, options) {
-
-      var helpers = options.helpers,
-          buffer = [];
-
-      params.forEach(function(node) {
-        if (typeof node === 'string') {
-          buffer.push(node);
-        } else {
-          var helperOptions = node[2];
-          helperOptions.helpers = helpers;
-          var ret = helpers.RESOLVE_IN_ATTR(context, node[0], node[1], helperOptions);
-          if (ret) { buffer.push(ret); }
-        }
-      });
-
-      if (buffer.length) {
-        options.element.setAttribute(name, buffer.join(''));
+    __exports__.SUBEXPR = SUBEXPR;function LOOKUP_HELPER(helperName, context, options) {
+      if (helperName === 'ATTRIBUTE') {
+        return this.ATTRIBUTE;
       }
     }
 
-    __exports__.ATTRIBUTE = ATTRIBUTE;
+    __exports__.LOOKUP_HELPER = LOOKUP_HELPER;function SIMPLE(context, name, options) {
+      return context[name];
+    }
+
+    __exports__.SIMPLE = SIMPLE;
   });
 define("htmlbars/runtime/placeholder", 
   ["handlebars/safe-string","exports"],

@@ -72,7 +72,7 @@ test("Attribute helpers are can return streams", function() {
   var template = compile('<a href="{{link-to \'post\' id}}">post</a>');
 
   var options = merge({}, defaultOptions);
-  options.helpers["link-to"] = function(params, objects) {
+  options.helpers["link-to"] = function(params) {
     equal(params[0], 'post');
     ok(params[1] instanceof LazyValue);
 

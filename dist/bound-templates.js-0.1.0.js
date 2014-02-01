@@ -162,9 +162,7 @@ define("bound-templates/runtime",
     "use strict";
     var LazyValue = __dependency1__["default"];
 
-    function streamifyArgs(context, params, options) {
-      var helpers = options.helpers;
-
+    function streamifyArgs(context, params, options, helpers) {
       // Convert ID params to streams
       for (var i = 0, l = params.length; i < l; i++) {
         if (options.types[i] === 'id') {
@@ -190,40 +188,40 @@ define("bound-templates/runtime",
       }
     }
 
-    function RESOLVE(context, path, params, options) {
-      var helpers = options.helpers,
-          helper = helpers[path];
+    function CONTENT(placeholder, path, context, params, options, helpers) {
+      var helper = helpers.LOOKUP_HELPER(path);
       if (helper) {
-        streamifyArgs(context, params, options);
+        streamifyArgs(context, params, options, helpers);
 
         var fragmentLazyValue = helper(params, options);
         if (fragmentLazyValue) {
           fragmentLazyValue.onNotify(function(sender) {
-            options.placeholder.replace(sender.value());
+            placeholder.replace(sender.value());
           });
 
-          options.placeholder.replace(fragmentLazyValue.value());
+          placeholder.replace(fragmentLazyValue.value());
         }
       } else {
         var lazyValue = helpers.STREAM_FOR(context, path);
 
         lazyValue.onNotify(function(sender) {
-          options.placeholder.clear();
-          updatePlaceholder(options.placeholder, options.escaped, sender.value());
+          placeholder.clear();
+          updatePlaceholder(placeholder, options.escaped, sender.value());
         });
 
-        updatePlaceholder(options.placeholder, options.escaped, lazyValue.value());
+        updatePlaceholder(placeholder, options.escaped, lazyValue.value());
       }
     }
 
-    __exports__.RESOLVE = RESOLVE;function ATTRIBUTE(context, name, params, options) {
-      var helpers = options.helpers,
-          builder = new LazyValue(function(values) {
+    __exports__.CONTENT = CONTENT;function ATTRIBUTE(element, name, params, options, helpers) {
+      var builder = new LazyValue(function(values) {
             return values.join('');
-          });
+          }),
+          name = params.shift();
+
 
       params.forEach(function(node) {
-        if (typeof node === 'string') {
+        if (typeof node === 'string' || node.isLazyValue) {
           builder.addDependentValue(node);
         } else {
           var helperOptions = node[2];
@@ -236,25 +234,40 @@ define("bound-templates/runtime",
       });
 
       builder.onNotify(function(lazyValue) {
-        options.element.setAttribute(name, lazyValue.value());
+        element.setAttribute(name, lazyValue.value());
       });
 
-      options.element.setAttribute(name, builder.value());
+      element.setAttribute(name, builder.value());
     }
 
-    __exports__.ATTRIBUTE = ATTRIBUTE;function RESOLVE_IN_ATTR(context, path, params, options) {
-      var helpers = options.helpers,
-          helper = helpers[path];
+    __exports__.ATTRIBUTE = ATTRIBUTE;function ELEMENT(element, path, context, params, options, helpers) {
+      var helper = helpers.LOOKUP_HELPER(path);
 
       if (helper) {
-        streamifyArgs(context, params, options);
+        streamifyArgs(context, params, options, helpers);
+        return helper(element, path, params, options, helpers);
+      } else {
+        return helpers.STREAM_FOR(context, path);
+      }
+    }
+
+    __exports__.ELEMENT = ELEMENT;
+    function SUBEXPR(path, context, params, options, helpers) {
+      var helper = helpers.LOOKUP_HELPER(path);
+      if (helper) {
+        streamifyArgs(context, params, options, helpers);
         return helper(params, options);
       } else {
         return helpers.STREAM_FOR(context, path);
       }
     }
 
-    __exports__.RESOLVE_IN_ATTR = RESOLVE_IN_ATTR;
+    __exports__.SUBEXPR = SUBEXPR;// TODO: Currently tied to `this`. Is that OK?
+    function LOOKUP_HELPER(name) {
+      return this[name];
+    }
+
+    __exports__.LOOKUP_HELPER = LOOKUP_HELPER;
   });
 window.bound-templates = requireModule("bound-templates");
 })(window);
