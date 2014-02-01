@@ -28,7 +28,6 @@ export var strictEqual = window.strictEqual;
 
 module BoundTemplates from "bound-templates";
 import { merge } from "htmlbars/utils";
-import { default as Stream, map, zipLatest } from "bound-templates/stream";
 import LazyValue from "bound-templates/lazy-value";
 
 export function equalHTML(fragment, html) {
@@ -38,7 +37,7 @@ export function equalHTML(fragment, html) {
   equal(div.innerHTML, html);
 }
 
-export { LazyValue, map, zipLatest, merge };
+export { LazyValue, merge };
 
 export function compile(string, options) {
   options = options || {};
