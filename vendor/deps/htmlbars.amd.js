@@ -2606,6 +2606,7 @@ define("htmlbars/compiler/hydration",
     prototype.helper = function(name, size, escaped, placeholderNum) {
       var prepared = prepareHelper(this.stack, size);
       prepared.options.push('escaped:'+escaped);
+      prepared.options.push('data:(typeof options !== "undefined" && options.data)');
       this.pushMustacheInContent(string(name), prepared.args, prepared.options, placeholderNum);
     };
 
@@ -2825,10 +2826,7 @@ define("htmlbars/compiler/hydration_opcode",
     };
 
     HydrationOpcodeCompiler.prototype.sexpr = function(sexpr) {
-      // I think this needs to move to sexpr in other compiler.
-      // We're pushing the 'sexpr' type for the parent fn to eval.
       this.string('sexpr');
-
       this.opcode('program', null, null);
       processParams(this, sexpr.params);
       processHash(this, sexpr.hash);
@@ -3434,47 +3432,37 @@ define("htmlbars/runtime/placeholder",
         throw new Error('a fragment parent must have boundary nodes in order to handle insertion');
       }
 
-      this.parent = parent;
+      this._parent = parent;
       this.start = startIndex === -1 ? null : parent.childNodes[startIndex];
       this.end = endIndex === -1 ? null : parent.childNodes[endIndex];
     }
 
     __exports__.Placeholder = Placeholder;Placeholder.prototype = {
-      checkParent: function () {
-        if (this.parent !== this.start.parentNode) {
-          this.parent = this.start.parentNode;
+      parent: function () {
+        if (this._parent.nodeType === 11 && this._parent !== this.start.parentNode) {
+          this._parent = this.start.parentNode;
         }
-      },
-      clear: function() {
-        if (this.parent.nodeType === 11) this.checkParent();
-
-        clear(this.parent, this.start, this.end);
-      },
-      replace: function(nodeOrString) {
-        if (this.parent.nodeType === 11) this.checkParent();
-
-        clear(this.parent, this.start, this.end);
-        append(this.parent, this.end, nodeOrString);
+        return this._parent;
       },
       append: function(nodeOrString) {
-        if (this.parent.nodeType === 11) this.checkParent();
-
-        append(this.parent, this.end, nodeOrString);
+        append(this.parent(), this.end, nodeOrString);
+      },
+      clear: function() {
+        clear(this.parent(), this.start, this.end);
+      },
+      replace: function(nodeOrString) {
+        var parent = this.parent();
+        clear(parent, this.start, this.end);
+        append(parent, this.end, nodeOrString);
       },
       appendChild: function(node) {
-        if (this.parent.nodeType === 11) this.checkParent();
-
-        appendChild(this.parent, this.end, node);
+        appendChild(this.parent(), this.end, node);
       },
       appendText: function (text) {
-        if (this.parent.nodeType === 11) this.checkParent();
-
-        appendText(this.parent, this.end, text);
+        appendText(this.parent(), this.end, text);
       },
       appendHTML: function (html) {
-        if (this.parent.nodeType === 11) this.checkParent();
-
-        appendHTML(this.parent, this.end, html);
+        appendHTML(this.parent(), this.end, html);
       }
     };
 
@@ -3538,6 +3526,102 @@ define("htmlbars/runtime/placeholder",
     }
 
     __exports__.clear = clear;
+  });
+define("htmlbars/runtime/placeholder_list", 
+  ["./placeholder","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var append = __dependency1__.append;
+    var clear = __dependency1__.clear;
+
+    var splice = Array.prototype.splice;
+
+    function PlaceholderList(placeholder) {
+      this.placeholder = placeholder;
+      this.list = [];
+    }
+
+    __exports__.PlaceholderList = PlaceholderList;PlaceholderList.prototype.append = function (nodes) {
+      this.replace(this.list.length, 0, nodes);
+    };
+
+    PlaceholderList.prototype.insert = function (index, nodes) {
+      this.replace(index, 0, nodes);
+    };
+
+    PlaceholderList.prototype.remove = function (index, length) {
+      this.replace(index, length);
+    };
+
+    PlaceholderList.prototype.clear = function () {
+      this.placeholder.clear();
+      this.list.length = 0;
+    };
+
+    PlaceholderList.prototype.replace = function (index, removedLength, addedNodes) {
+      var placeholder = this.placeholder,
+        parent = this.placeholder.parent(),
+        list = this.list,
+        before = index > 0 ? list[index-1] : null,
+        after = index+removedLength < list.length ? list[index+removedLength] : null,
+        start = before === null ? placeholder.start : (before.end === null ? parent.lastChild : before.end.previousSibling),
+        end   = after === null ? placeholder.end : (after.start === null ? parent.firstChild : after.start.nextSibling),
+        addedLength = addedNodes === undefined ? 0 : addedNodes.length,
+        args, i, current;
+
+      if (removedLength > 0) {
+        clear(parent, start, end);
+      }
+
+      if (addedLength === 0) {
+        if (before !== null) {
+          before.end = end;
+        }
+        if (after !== null) {
+          after.start = start;
+        }
+        list.splice(index, removedLength);
+        return;
+      }
+
+      args = new Array(addedLength+2);
+      for (i=0; i<addedLength; i++) {
+        append(parent, end, addedNodes[i]);
+        if (before !== null) {
+          before.end = start.nextSibling;
+        }
+        args[i+2] = current = {
+          start: start,
+          end: end
+        };
+        start = end === null ? parent.lastChild : end.previousSibling;
+        before = current;
+      }
+
+      if (after !== null) {
+        after.start = end.previousSibling;
+      }
+
+      args[0] = index;
+      args[1] = removedLength;
+
+      splice.apply(list, args);
+    };
+
+    /*
+    0 <div>a</div> null b
+    1 <div>b</div> a c -> a (start.nextSibling === i)
+         <-- <div>i</div> start === b end === c
+    2 <div>c</div> b d  -> (end.previousSibling === i) d
+    3 <div>d</div> c null
+    */
+
+    /* start == a  and  end == d
+    0 <div>a</div> null b > null d > null end
+    1 - <div>b</div> a c
+    2 - <div>c</div> b d
+    3 <div>d</div> c null > a null > start null
+    */
   });
 define("htmlbars/utils", 
   ["exports"],
