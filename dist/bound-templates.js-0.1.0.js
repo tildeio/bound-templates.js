@@ -192,7 +192,7 @@ define("bound-templates/runtime",
       var helper = helpers.LOOKUP_HELPER(path);
       if (helper) {
         streamifyArgs(context, params, options, helpers);
-
+        options.placeholder = placeholder; // FIXME: this kinda sucks
         var fragmentLazyValue = helper(params, options);
         if (fragmentLazyValue) {
           fragmentLazyValue.onNotify(function(sender) {
