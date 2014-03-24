@@ -180,36 +180,24 @@ define("bound-templates/runtime",
       }
     }
 
-    function updatePlaceholder(placeholder, escaped, value) {
-      if (escaped) {
-        placeholder.appendText(value);
-      } else {
-        placeholder.appendHTML(value);
-      }
-    }
-
     function CONTENT(placeholder, path, context, params, options, helpers) {
+      // TODO: just set escaped on the placeholder in HTMLBars
+      placeholder.escaped = options.escaped;
+      var lazyValue;
       var helper = helpers.LOOKUP_HELPER(path);
       if (helper) {
         streamifyArgs(context, params, options, helpers);
         options.placeholder = placeholder; // FIXME: this kinda sucks
-        var fragmentLazyValue = helper(params, options);
-        if (fragmentLazyValue) {
-          fragmentLazyValue.onNotify(function(sender) {
-            placeholder.replace(sender.value());
-          });
-
-          placeholder.replace(fragmentLazyValue.value());
-        }
+        lazyValue = helper(params, options);
       } else {
-        var lazyValue = helpers.STREAM_FOR(context, path);
-
+        lazyValue = helpers.STREAM_FOR(context, path);
+      }
+      if (lazyValue) {
         lazyValue.onNotify(function(sender) {
-          placeholder.clear();
-          updatePlaceholder(placeholder, options.escaped, sender.value());
+          placeholder.update(sender.value());
         });
 
-        updatePlaceholder(placeholder, options.escaped, lazyValue.value());
+        placeholder.update(lazyValue.value());
       }
     }
 
