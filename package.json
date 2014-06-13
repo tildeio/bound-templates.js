@@ -1,6 +1,6 @@
 {
   "name": "bound-templates.js",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bound Templates is a library that provides an interface similar to Polymer's MDV on more browsers (by using wrapper objects and an HTML parser written in JS)",
   "main": "index.js",
   "scripts": {

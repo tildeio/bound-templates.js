@@ -1,5 +1,5 @@
 define("bound-templates", 
-  ["htmlbars/compiler","bound-templates/lazy-value","exports"],
+  ["htmlbars-compiler/compiler","bound-templates/lazy-value","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     var htmlbarsCompile = __dependency1__.compile;
@@ -109,11 +109,12 @@ define("bound-templates/runtime",
     "use strict";
     var LazyValue = __dependency1__["default"];
 
-    function streamifyArgs(context, params, options, helpers) {
+    function streamifyArgs(context, params, options, env) {
+      var hooks = env.hooks;
       // Convert ID params to streams
       for (var i = 0, l = params.length; i < l; i++) {
         if (options.types[i] === 'id') {
-          params[i] = helpers.STREAM_FOR(context, params[i]);
+          params[i] = hooks.streamFor(context, params[i]);
         }
       }
 
@@ -122,85 +123,85 @@ define("bound-templates/runtime",
           hashTypes = options.hashTypes;
       for (var key in hash) {
         if (hashTypes[key] === 'id') {
-          hash[key] = helpers.STREAM_FOR(context, hash[key]);
+          hash[key] = hooks.streamFor(context, hash[key]);
         }
       }
     }
 
-    function CONTENT(placeholder, path, context, params, options, helpers) {
-      // TODO: just set escaped on the placeholder in HTMLBars
-      placeholder.escaped = options.escaped;
+    function content(morph, path, context, params, options, env) {
+      var hooks = env.hooks;
+
+      // TODO: just set escaped on the morph in HTMLBars
+      morph.escaped = options.escaped;
       var lazyValue;
-      var helper = helpers.LOOKUP_HELPER(path);
+      var helper = hooks.lookupHelper(path, env);
       if (helper) {
-        streamifyArgs(context, params, options, helpers);
-        options.placeholder = placeholder; // FIXME: this kinda sucks
-        lazyValue = helper(params, options);
+        streamifyArgs(context, params, options, env);
+        options.morph = morph; // FIXME: this kinda sucks
+        options.context = context; // FIXME: this kinda sucks
+        lazyValue = helper(params, options, env);
       } else {
-        lazyValue = helpers.STREAM_FOR(context, path);
+        lazyValue = hooks.streamFor(context, path);
       }
       if (lazyValue) {
         lazyValue.onNotify(function(sender) {
-          placeholder.update(sender.value());
+          morph.update(sender.value());
         });
 
-        placeholder.update(lazyValue.value());
+        morph.update(lazyValue.value());
       }
     }
 
-    __exports__.CONTENT = CONTENT;function ATTRIBUTE(element, name, params, options, helpers) {
-      var builder = new LazyValue(function(values) {
-            return values.join('');
-          }),
-          name = params.shift();
+    __exports__.content = content;function element(element, path, context, params, options, env) {
+      var hooks = env.hooks;
+      var helper = hooks.lookupHelper(path, env);
 
+      if (helper) {
+        streamifyArgs(context, params, options, env);
+        return helper(element, params, options, env);
+      } else {
+        return hooks.streamFor(context, path);
+      }
+    }
 
-      params.forEach(function(node) {
-        if (typeof node === 'string' || node.isLazyValue) {
-          builder.addDependentValue(node);
-        } else {
-          var helperOptions = node[2];
-          helperOptions.helpers = helpers;
+    __exports__.element = element;function subexpr(path, context, params, options, env) {
+      var hooks = env.hooks;
+      var helper = hooks.lookupHelper(path, env);
 
-          // TODO: support attributes returning more than streams
-          var stream = helpers.RESOLVE_IN_ATTR(context, node[0], node[1], helperOptions);
-          builder.addDependentValue(stream);
-        }
-      });
+      if (helper) {
+        streamifyArgs(context, params, options, env);
+        return helper(params, options, env);
+      } else {
+        return hooks.streamFor(context, path);
+      }
+    }
 
-      builder.onNotify(function(lazyValue) {
+    __exports__.subexpr = subexpr;function lookupHelper(name, env) {
+      if (name === 'concat') { return concat; }
+      if (name === 'attribute') { return attribute; }
+      return env.helpers[name];
+    }
+
+    __exports__.lookupHelper = lookupHelper;function attribute(element, params, options) {
+      var name = params[0],
+          value = params[1];
+
+      value.onNotify(function(lazyValue) {
         element.setAttribute(name, lazyValue.value());
       });
 
-      element.setAttribute(name, builder.value());
+      element.setAttribute(name, value.value());
     }
 
-    __exports__.ATTRIBUTE = ATTRIBUTE;function ELEMENT(element, path, context, params, options, helpers) {
-      var helper = helpers.LOOKUP_HELPER(path);
+    function concat(params, options) {
+      var builder = new LazyValue(function(values) {
+        return values.join('');
+      });
 
-      if (helper) {
-        streamifyArgs(context, params, options, helpers);
-        return helper(element, path, params, options, helpers);
-      } else {
-        return helpers.STREAM_FOR(context, path);
-      }
+      params.forEach(function(node) {
+        builder.addDependentValue(node);
+      });
+
+      return builder;
     }
-
-    __exports__.ELEMENT = ELEMENT;
-    function SUBEXPR(path, context, params, options, helpers) {
-      var helper = helpers.LOOKUP_HELPER(path);
-      if (helper) {
-        streamifyArgs(context, params, options, helpers);
-        return helper(params, options);
-      } else {
-        return helpers.STREAM_FOR(context, path);
-      }
-    }
-
-    __exports__.SUBEXPR = SUBEXPR;// TODO: Currently tied to `this`. Is that OK?
-    function LOOKUP_HELPER(name) {
-      return this[name];
-    }
-
-    __exports__.LOOKUP_HELPER = LOOKUP_HELPER;
   });

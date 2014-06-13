@@ -1,4 +1,4 @@
-import { compile, defaultOptions, module, test, equal, equalHTML, LazyValue, notify } from "test_helpers";
+import { compile, defaultEnv, module, test, equal, equalHTML, LazyValue, notify } from "test_helpers";
 
 function set(context, property, value) {
   context[property] = value;
@@ -7,7 +7,7 @@ function set(context, property, value) {
 
 module("Subexpressions", {
   setup: function() {
-    defaultOptions.helpers.concat = function(params) {
+    defaultEnv.helpers.myconcat = function(params) {
       var lazyValue = new LazyValue(function(values) {
         return values.join('')
       });
@@ -19,14 +19,14 @@ module("Subexpressions", {
   },
 
   teardown: function() {
-    delete defaultOptions.helpers.concat;
+    delete defaultEnv.helpers.myconcat;
   }
 });
 
 test("in element", function() {
-  var template = compile("<div>{{concat 'foo' (concat bar 'baz')}}</div>"),
+  var template = compile("<div>{{myconcat 'foo' (myconcat bar 'baz')}}</div>"),
       context = {bar: 'bar'},
-      fragment = template(context, defaultOptions);
+      fragment = template(context, defaultEnv);
 
   equalHTML(fragment, "<div>foobarbaz</div>");
 
@@ -35,9 +35,9 @@ test("in element", function() {
 });
 
 test("inside attribute", function() {
-  var template = compile("<div class='{{concat 'foo' (concat bar 'baz')}}'></div>"),
+  var template = compile("<div class='{{myconcat 'foo' (myconcat bar 'baz')}}'></div>"),
       context = {bar: 'bar'},
-      fragment = template(context, defaultOptions);
+      fragment = template(context, defaultEnv);
 
   equalHTML(fragment, '<div class="foobarbaz"></div>');
 
@@ -45,13 +45,13 @@ test("inside attribute", function() {
   equalHTML(fragment, '<div class="fooBARbaz"></div>');
 });
 
-// We consider the use of "transform" helpers, like concat, invalid for use in elements.
+// We consider the use of "transform" helpers, like myconcat, invalid for use in elements.
 test("inside element", function() {
-  var template = compile("<div {{concat 'foo' (concat bar 'baz')}}></div>"),
+  var template = compile("<div {{myconcat 'foo' (myconcat bar 'baz')}}></div>"),
       context = {bar: 'bar'};
 
   // TODO: Nice error message
   raises(function() {
-    template(context, defaultOptions);
+    template(context, defaultEnv);
   });
 });
