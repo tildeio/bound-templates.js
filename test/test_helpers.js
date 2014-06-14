@@ -27,7 +27,7 @@ export var deepEqual = window.deepEqual;
 export var strictEqual = window.strictEqual;
 
 module BoundTemplates from "bound-templates";
-import { merge } from "htmlbars/utils";
+import { merge } from "htmlbars-runtime/utils";
 import LazyValue from "bound-templates/lazy-value";
 
 export function equalHTML(fragment, html) {
@@ -41,16 +41,17 @@ export { LazyValue, merge };
 
 export function compile(string, options) {
   options = options || {};
+  options.hooks = options.hooks || {};
   options.helpers = options.helpers || {};
 
   return BoundTemplates.compile(string, {
-    helpers: merge(options.helpers, {
-      STREAM_FOR: STREAM_FOR
+    hooks: merge(options.hooks, {
+      streamFor: streamFor
     })
   });
 }
 
-export function STREAM_FOR(context, path) {
+export function streamFor(context, path) {
   var lazyValue = new LazyValue(function() {
     return get(context, path);
   });
@@ -137,17 +138,17 @@ export function FragmentStream(callback) {
   };
 }
 
-import { CONTENT, ATTRIBUTE, ELEMENT, SUBEXPR, LOOKUP_HELPER } from "bound-templates/runtime";
+import { content, element, subexpr, lookupHelper } from "bound-templates/runtime";
 
-var helpers = {
-  STREAM_FOR: STREAM_FOR,
-  CONTENT: CONTENT,
-  ATTRIBUTE: ATTRIBUTE,
-  ELEMENT: ELEMENT,
-  SUBEXPR: SUBEXPR,
-  LOOKUP_HELPER: LOOKUP_HELPER
+var hooks = {
+  streamFor: streamFor,
+  content: content,
+  element: element,
+  subexpr: subexpr,
+  lookupHelper: lookupHelper
 };
 
-export var defaultOptions = {
-  helpers: helpers
+export var defaultEnv = {
+  hooks: hooks,
+  helpers: {}
 };

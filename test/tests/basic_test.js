@@ -1,4 +1,4 @@
-import { defaultOptions, module, test, equal, merge } from "test_helpers";
+import { defaultEnv, module, test, equal, merge } from "test_helpers";
 import { equalHTML } from "test_helpers";
 import { compile, LazyValue, STREAM_FOR } from "test_helpers";
 import { notify } from "test_helpers";
@@ -13,20 +13,20 @@ module("Basic test", {
 test("Basic HTML becomes an HTML fragment", function() {
   var template = compile("<p>hello</p>");
 
-  equalHTML(template(), "<p>hello</p>");
+  equalHTML(template({}, defaultEnv), "<p>hello</p>");
 });
 
 test("Basic curlies insert the contents of the curlies", function() {
   var template = compile("<p>{{hello}}</p>");
 
-  equalHTML(template({ hello: "hello world" }, defaultOptions), "<p>hello world</p>");
+  equalHTML(template({ hello: "hello world" }, defaultEnv), "<p>hello world</p>");
 });
 
 test("Curlies can be updated when the model changes", function() {
   var template = compile("<p>{{hello}}</p>");
 
   var model = { hello: "hello world" },
-      fragment = template(model, defaultOptions);
+      fragment = template(model, defaultEnv);
 
   equalHTML(fragment, "<p>hello world</p>");
 
@@ -40,7 +40,7 @@ test("Curlies without a parent can be updated when the model changes", function(
   var template = compile("{{foo}}{{bar}}");
 
   var model = { foo: "foo", bar: "bar" },
-      fragment = template(model, defaultOptions);
+      fragment = template(model, defaultEnv);
 
   var fixtureEl = document.getElementById('qunit-fixture');
   fixtureEl.appendChild(fragment);
@@ -52,11 +52,11 @@ test("Curlies without a parent can be updated when the model changes", function(
 
   equal(fixtureEl.innerHTML, "foo still herebar");
 });
+
 test("Attribute runs can be updated when the model changes", function() {
   var template = compile('<a href="http://{{host}}/{{path}}">hello</a>');
-
   var model = { host: "example.com", path: "hello" },
-      fragment = template(model, defaultOptions);
+      fragment = template(model, defaultEnv);
 
   equalHTML(fragment, '<a href="http://example.com/hello">hello</a>');
 
@@ -71,8 +71,8 @@ test("Attribute runs can be updated when the model changes", function() {
 test("Attribute helpers are can return streams", function() {
   var template = compile('<a href="{{link-to \'post\' id}}">post</a>');
 
-  var options = merge({}, defaultOptions);
-  options.helpers["link-to"] = function(params) {
+  var env = merge({}, defaultEnv);
+  env.helpers["link-to"] = function(params) {
     equal(params[0], 'post');
     ok(params[1] instanceof LazyValue);
 
@@ -82,7 +82,7 @@ test("Attribute helpers are can return streams", function() {
   };
 
   var model = { id: 1 },
-      fragment = template(model, options);
+      fragment = template(model, env);
 
   equalHTML(fragment, '<a href="/posts/1">post</a>');
 
@@ -95,8 +95,8 @@ test("Attribute helpers are can return streams", function() {
 test("Attribute helpers can merge path streams", function() {
   var template = compile('<a href="{{link-to host=host path=path}}">post</a>');
 
-  var options = merge({}, defaultOptions);
-  options.helpers["link-to"] = function(params, options) {
+  var env = merge({}, defaultEnv);
+  env.helpers["link-to"] = function(params, options) {
     var hash = options.hash;
 
     ok(hash.host instanceof LazyValue);
@@ -108,7 +108,7 @@ test("Attribute helpers can merge path streams", function() {
   };
 
   var model = { host: "example.com", path: "hello" },
-      fragment = template(model, options);
+      fragment = template(model, env);
 
   equalHTML(fragment, '<a href="http://example.com/hello">post</a>');
 
@@ -127,7 +127,7 @@ test("Attribute runs can be updated when the model path changes", function() {
           host: { url: "example.com" },
           path: { name: "hello" }
       },
-      fragment = template(model, defaultOptions);
+      fragment = template(model, defaultEnv);
 
   equalHTML(fragment, '<a href="http://example.com/hello">hello</a>');
 
@@ -142,8 +142,8 @@ test("Attribute runs can be updated when the model path changes", function() {
 test("Helper arguments get properly converted to streams when appropriate", function() {
   expect(4);
 
-  var options = merge({}, defaultOptions);
-  options.helpers.testing = function(params, options) {
+  var env = merge({}, defaultEnv);
+  env.helpers.testing = function(params, options) {
     equal(params[0], 'foo');
     ok(params[1] instanceof LazyValue);
     ok(options.hash.baz instanceof LazyValue);
@@ -151,5 +151,5 @@ test("Helper arguments get properly converted to streams when appropriate", func
   };
 
   var template = compile('<div>{{testing "foo" bar baz=qux seems="good"}}</div>');
-  template({bar: "bar", qux: "qux"}, options);
+  template({bar: "bar", qux: "qux"}, env);
 });
