@@ -27,7 +27,9 @@ module.exports = function(grunt) {
                     ]);
 
   // Run a server. This is ideal for running the QUnit tests in the browser.
-  this.registerTask('server', ['build', 'tests', 'connect', 'watch']);
+  this.registerTask('server', ['jshint', 'build', 'tests', 'connect', 'watch']);
+
+  this.registerTask('test', ['jshint', 'tests', 'qunit']);
 
   grunt.initConfig({
     pkg: grunt.file.readJSON('package.json'),
@@ -57,7 +59,7 @@ module.exports = function(grunt) {
 
     watch: {
       files: ['lib/**', 'vendor/**', 'test/**/*'],
-      tasks: ['build', 'tests']
+      tasks: ['jshint', 'build', 'tests']
     },
 
     transpile: {
@@ -82,7 +84,15 @@ module.exports = function(grunt) {
       }
     },
 
-    clean: ["dist"],
+    jshint: {
+      library: 'lib/**/*.js',
+      tests: 'test/tests/**/*.js',
+      options: {
+        jshintrc: '.jshintrc'
+      }
+    },
+
+    clean: ["dist", "tmp"],
 
     concat: {
       library: {
@@ -118,6 +128,10 @@ module.exports = function(grunt) {
         ],
         dest: 'tmp/tests.js'
       }
+    },
+
+    qunit: {
+      all: ['test/index.html']
     }
   });
 
@@ -126,6 +140,8 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-connect');
   grunt.loadNpmTasks('grunt-contrib-watch');
+  grunt.loadNpmTasks('grunt-contrib-qunit');
+  grunt.loadNpmTasks('grunt-contrib-jshint');
 
   // Multi-task for wrapping browser version
 

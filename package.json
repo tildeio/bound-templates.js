@@ -4,7 +4,7 @@
   "description": "Bound Templates is a library that provides an interface similar to Polymer's MDV on more browsers (by using wrapper objects and an HTML parser written in JS)",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "grunt test"
   },
   "repository": {
     "type": "git",
@@ -22,6 +22,9 @@
     "grunt-contrib-connect": "~0.1.2",
     "grunt-contrib-watch": "~0.2.0",
     "grunt-hang": "~0.1.2",
-    "connect-redirection": "0.0.1"
+    "connect-redirection": "0.0.1",
+    "grunt-contrib-qunit": "~0.5.1",
+    "grunt-contrib-jshint": "~0.10.0",
+    "grunt-cli": "~0.1.13"
   }
 }

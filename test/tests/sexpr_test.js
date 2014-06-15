@@ -9,7 +9,7 @@ module("Subexpressions", {
   setup: function() {
     defaultEnv.helpers.myconcat = function(params) {
       var lazyValue = new LazyValue(function(values) {
-        return values.join('')
+        return values.join('');
       });
       params.forEach(function(param) {
         lazyValue.addDependentValue(param);
