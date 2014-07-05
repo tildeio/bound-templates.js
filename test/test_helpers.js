@@ -148,7 +148,10 @@ var hooks = {
   lookupHelper: lookupHelper
 };
 
+import {DOMHelper} from "morph";
+
 export var defaultEnv = {
   hooks: hooks,
-  helpers: {}
+  helpers: {},
+  dom: new DOMHelper()
 };
